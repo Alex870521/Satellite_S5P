@@ -1,0 +1,9 @@
+Cartopy~=0.24.1
+numpy~=2.1.2
+xarray~=2024.9.0
+matplotlib~=3.9.2
+geopandas~=1.0.1
+scipy~=1.14.1
+netCDF4~=1.7.1
+pandas~=2.2.3
+shapely~=2.0.6
