@@ -2,6 +2,8 @@
 import os
 import requests
 import logging
+import zipfile
+
 from pathlib import Path
 from tqdm import tqdm
 
@@ -19,8 +21,8 @@ class Downloader:
         self.session.trust_env = False
         self._retries = requests.adapters.Retry(
             total=5,
-            backoff_factor=0.1,
-            status_forcelist=[500, 502, 503, 504],
+            backoff_factor=10,
+            status_forcelist=[429, 500, 502, 503, 504],
         )
         self.session.mount('https://', requests.adapters.HTTPAdapter(max_retries=self._retries))
 
@@ -45,31 +47,50 @@ class Downloader:
 
             # 建立臨時檔案
             temp_path = output_path.with_suffix('.tmp')
+            zip_path = output_path.with_suffix('.zip')
 
             try:
-                with open(temp_path, 'wb') as file:
-                    for data in response.iter_content(block_size):
-                        file.write(data)
-                        downloaded += len(data)
-                        if progress_callback:
-                            progress_callback(min(downloaded, total_size))
+                if output_path.exists() and zipfile.is_zipfile(output_path):
+                    output_path.rename(zip_path)
 
-                # 下載完成後，將臨時檔案重命名為正式檔案
-                if temp_path.exists():
-                    if output_path.exists():
-                        output_path.unlink()
-                    temp_path.rename(output_path)
+                elif zip_path.exists() and not zipfile.is_zipfile(zip_path):
+                    zip_path.rename(output_path)
+                    return True
+
+                elif zip_path.exists() and zipfile.is_zipfile(zip_path):
+                    pass
+
+                else:
+                    # 下載到臨時檔案
+                    with open(temp_path, 'wb') as file:
+                        for data in response.iter_content(block_size):
+                            file.write(data)
+                            downloaded += len(data)
+                            if progress_callback:
+                                progress_callback(min(downloaded, total_size))
+
+                    # 移動臨時檔案到 zip
+                    temp_path.rename(zip_path)
+
+                # 解壓縮處理
+                if zipfile.is_zipfile(zip_path):
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        nc_files = [f for f in zip_ref.namelist() if f.endswith('.nc')]
+                        if nc_files:
+                            with zip_ref.open(nc_files[0]) as source, open(output_path, 'wb') as target:
+                                target.write(source.read())
+
+                elif not zipfile.is_zipfile(zip_path):
+                    zip_path.rename(output_path)
+
                 return True
 
             finally:
-                # 清理臨時檔案
                 if temp_path.exists():
                     temp_path.unlink()
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Download error: {str(e)}")
-            return False
+                if zip_path.exists():
+                    zip_path.unlink()
 
         except Exception as e:
-            logger.error(f"Unexpected error during download: {str(e)}")
+            logger.error(f"Download error: {str(e)}")
             return False

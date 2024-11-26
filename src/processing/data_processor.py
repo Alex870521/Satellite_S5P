@@ -1,23 +1,24 @@
 """src/processing/no2_processor.py"""
+import logging
 import numpy as np
 import xarray as xr
-import logging
-import zipfile
-import tempfile
-from pathlib import Path
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 from src.processing.interpolators import DataInterpolator
 from src.processing.taiwan_frame import TaiwanFrame
-from src.config.settings import RAW_DATA_DIR, PROCESSED_DATA_DIR, FIGURE_DIR
-from src.visualization.sample_plot_nc import plot_global_no2
+from src.config.settings import RAW_DATA_DIR, PROCESSED_DATA_DIR, FIGURE_DIR, FIGURE_BOUNDARY
+from src.visualization.plot_nc import plot_global_var
+from src.config.catalog import ClassInput, TypeInput, PRODUCT_CONFIGS
+from src.config.richer import DisplayManager
+
 
 logger = logging.getLogger(__name__)
 
 
-class NO2Processor:
-    def __init__(self, interpolation_method='kdtree', resolution=0.02, mask_value=0.50):
-        """初始化 NO2 處理器
+class S5Processor:
+    def __init__(self, interpolation_method='kdtree', resolution=0.01, mask_qc_value=0.75):
+        """初始化處理器
 
         Parameters:
         -----------
@@ -25,27 +26,13 @@ class NO2Processor:
             插值方法，可選 'griddata' 或 'kdtree'
         resolution : float
             網格解析度（度）
-        mask_value : float
+        mask_qc_value : float
             QA 值的閾值
         """
         self.interpolation_method = interpolation_method
         self.resolution = resolution
-        self.mask_value = mask_value
+        self.mask_qc_value = mask_qc_value
         self.taiwan_frame = TaiwanFrame()
-
-    @staticmethod
-    def process_zipped_nc(zip_path: Path):
-        """處理壓縮的 NC 檔案"""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_dir_path = Path(temp_dir)
-
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(temp_dir)
-
-            nc_files = list(temp_dir_path.rglob("*.nc"))
-            if nc_files:
-                return xr.open_dataset(nc_files[0], group='PRODUCT')
-        return None
 
     def create_grid(self, lon: np.ndarray, lat: np.ndarray):
         """根據數據的經緯度範圍創建網格"""
@@ -60,147 +47,181 @@ class NO2Processor:
         # 創建網格矩陣
         return np.meshgrid(grid_lon, grid_lat)
 
-    def extract_data(self, dataset: xr.Dataset, use_taiwan_mask: bool = False):
-        """從數據集中提取數據
+    def extract_data(self, dataset: xr.Dataset, extract_range: tuple[float, float, float, float] = None):
+        """提取數據，可選擇是否限定範圍
 
-        Parameters:
-        -----------
-        dataset : xr.Dataset
-            輸入的數據集
-        use_taiwan_mask : bool
-            是否只提取台灣區域的數據
+        Args:
+            dataset: xarray Dataset
+            extract_range: 可選的tuple (min_lon, max_lon, min_lat, max_lat)，如果提供則提取指定範圍
         """
-        if use_taiwan_mask:
-            return self._extract_data_taiwan(dataset)
-        return self._extract_data_global(dataset)
+        # 初始處理
+        time = np.datetime64(dataset.time.values[0], 'D')
+        attributes = PRODUCT_CONFIGS[self.product_type].dataset_name
 
-    def _extract_data_global(self, dataset: xr.Dataset):
-        """提取全球範圍的數據"""
-        time = dataset.time.values[0]
-        lat = dataset.latitude.values[0]
-        lon = dataset.longitude.values[0]
-        no2 = dataset.nitrogendioxide_tropospheric_column.values[0]
-        qa = dataset.qa_value.values[0]
+        # 如果提供了範圍，進行過濾
+        if extract_range is not None:
+            min_lon, max_lon, min_lat, max_lat = extract_range
+            mask_lon = (dataset.longitude >= min_lon) & (dataset.longitude <= max_lon)
+            mask_lat = (dataset.latitude >= min_lat) & (dataset.latitude <= max_lat)
+            dataset = dataset.where((mask_lon & mask_lat), drop=True)
 
-        # 根據 QA 值過濾數據
-        mask = qa < self.mask_value
-        no2[mask] = np.nan
+            # 檢查是否有數據
+            if dataset.sizes['scanline'] == 0 or dataset.sizes['ground_pixel'] == 0:
+                raise ValueError(f"No data points within region: {extract_range}")
 
-        logger.info(f"\t{'data time':15}: {np.datetime64(time, 'D').astype(str)}")
-        logger.info(f"\t{'lon range':15}: {lon.min():.2f} to {lon.max():.2f}")
-        logger.info(f"\t{'lat range':15}: {lat.min():.2f} to {lat.max():.2f}")
-        logger.info(f"\t{'data shape':15}: {no2.shape}")
+        # QA 過濾
+        mask_qa = (dataset.qa_value >= self.mask_qc_value)
+        dataset = dataset.where(mask_qa)
 
-        return lon, lat, no2
-
-    def _extract_data_taiwan(self, dataset: xr.Dataset):
-        """提取台灣區域的數據"""
-        # 設定條件
-        mask_lon = ((dataset.longitude >= 118) & (dataset.longitude <= 124))
-        mask_lat = ((dataset.latitude >= 20) & (dataset.latitude <= 27))
-        masked_lon_lat_ds = dataset.where((mask_lon & mask_lat), drop=True)
-
-        if masked_lon_lat_ds.sizes['scanline'] == 0 or masked_lon_lat_ds.sizes['ground_pixel'] == 0:
-            raise ValueError("No data points within Taiwan region")
-
-        mask_qa = (masked_lon_lat_ds.qa_value >= self.mask_value)
-        masked_ds = masked_lon_lat_ds.where(mask_qa)
-
-        if np.all(np.isnan(masked_ds.nitrogendioxide_tropospheric_column)):
+        # 檢查數據有效性
+        if np.all(np.isnan(dataset[attributes])):
             raise ValueError("No valid data points after QA filtering")
 
-        return (
-            masked_ds.longitude[0].data,
-            masked_ds.latitude[0].data,
-            masked_ds.nitrogendioxide_tropospheric_column[0].data
-        )
+        lon = dataset.longitude[0].values
+        lat = dataset.latitude[0].values
+        shape = dataset.latitude[0].values.shape
+        var = dataset[attributes][0].values
 
-    def process_each_data(self, start_date: str, end_date: str, use_taiwan_mask: bool = False):
-        """處理單一數據"""
-        # 將字串日期轉換為 datetime 物件
+        info_dict = {
+            'time': f"{time}",
+            'shape': f"{shape}",
+            'latitude': f'{np.nanmin(lat):.2f} to {np.nanmax(lat):.2f}',
+            'longitude': f'{np.nanmin(lon):.2f} to {np.nanmax(lon):.2f}',
+        }
+
+        if hasattr(self, 'nc_info'):
+            self.nc_info.update(info_dict)
+
+        return lon, lat, var
+
+    def process_each_data(self,
+                          file_class: ClassInput,
+                          file_type: TypeInput,
+                          start_date: str,
+                          end_date: str,
+                          ):
+        """
+        處理指定日期範圍內的衛星數據
+
+        Args:
+            file_class : ProductClassInput
+            file_type: ProductTypeInput
+            start_date (str): 開始日期 (YYYY-MM-DD)
+            end_date (str): 結束日期 (YYYY-MM-DD)
+        """
+        def process_single_file(file_path, output_dir):
+            """處理單一數據檔案"""
+            ds = xr.open_dataset(file_path, engine='netcdf4', group='PRODUCT')
+
+            # 確保輸出目錄存在
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / file_path.name
+
+            if not output_path.exists():
+                ds.to_netcdf(output_path)
+
+            if ds is None:
+                return
+
+            try:
+                # 1. 紀錄 nc 檔訊息
+                self.nc_info = {'file_name': file_path.name}
+
+                # # 2. 提取數據和信息
+                # lon, lat, var = self.extract_data(ds, extract_range=FIGURE_BOUNDARY)
+                #
+                # # 3. 顯示檔案信息
+                # DisplayManager().display_product_info(self.nc_info)
+                #
+                # # 4. 創建網格並進行插值
+                # lon_grid, lat_grid = self.create_grid(lon, lat)
+                # var_grid = DataInterpolator.interpolate(
+                #     lon, lat, var,
+                #     lon_grid, lat_grid,
+                #     method=self.interpolation_method
+                # )
+                #
+                # # 5. 創建插值後的數據集
+                # interpolated_ds = xr.Dataset(
+                #     {
+                #         self.product_type.dataset_name: (
+                #             ['time', 'latitude', 'longitude'],
+                #             var_grid[np.newaxis, :, :]
+                #         )
+                #     },
+                #     coords={
+                #         'time': ds.time.values[0:1],
+                #         'latitude': np.squeeze(lat_grid[:, 0]),
+                #         'longitude': np.squeeze(lon_grid[0, :])
+                #     }
+                # )
+
+            finally:
+                ds.close()
+
+        # 主處理流程
         start = datetime.strptime(start_date, '%Y-%m-%d')
         end = datetime.strptime(end_date, '%Y-%m-%d')
-
-        # 逐月處理每個月份的路徑
         current_date = start
+
+        # 按月份逐月處理
         while current_date <= end:
+            # 1. 準備當月的目錄路徑
+            product_type = file_type
             year = current_date.strftime('%Y')
             month = current_date.strftime('%m')
 
-            # 構建每個月份的 input 和 output 路徑
-            input_dir = RAW_DATA_DIR / year / month
-            output_dir = PROCESSED_DATA_DIR / year / month
-            figure_output_file = FIGURE_DIR / year / month
+            input_dir = RAW_DATA_DIR / product_type / year / month
+            output_dir = PROCESSED_DATA_DIR / product_type / year / month
+            figure_dir = FIGURE_DIR / product_type / year / month
 
-            # 創建路徑
-            input_dir.mkdir(parents=True, exist_ok=True)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            figure_output_file.mkdir(parents=True, exist_ok=True)
+            # 2. 創建必要的目錄
+            for directory in [output_dir, figure_dir]:
+                directory.mkdir(parents=True, exist_ok=True)
 
-            # for monthly data
-            # output_file = output_dir / f"NO2_{year}{month}.nc"
-            #
-            # if output_file.exists():
-            #     logger.info(f"File {output_file} exists, skipping")
+            file_pattern = f"*{file_class}_L2__{file_type}*.nc"
 
-            # container = []
+            # 3. 處理原始數據（如果存在）
+            if input_dir.exists():
+                for file_path in input_dir.glob(file_pattern):
+                    # 檢查檔案日期是否在指定範圍內
+                    date_to_check = datetime.strptime(file_path.name[20:28], '%Y%m%d')
+                    if not (start <= date_to_check <= end):
+                        continue
+                    try:
+                        process_single_file(file_path, output_dir)
+                    except Exception as e:
+                        logger.error(f"處理檔案 {file_path.name} 時發生錯誤: {e}")
+                        continue
 
-            # 目前只拿"NTRI"畫圖
-            for file_path in input_dir.glob("*NRTI_L2__NO2*.nc"):
-                logger.info(f'Processing: {file_path.name}')
+            # 4. 繪製圖片（使用處理後的數據）
+            processed_files = list(output_dir.glob(file_pattern))
+            if not processed_files:
+                logger.warning(f"在 {output_dir} 中找不到符合條件的處理後檔案")
+                continue
 
+            for file_path in processed_files:
+                date_to_check = datetime.strptime(file_path.name[20:28], '%Y%m%d')
+                if not (start <= date_to_check <= end):
+                    continue
+                figure_path = figure_dir / f"{file_path.stem}.png"
                 try:
-                    dataset = self.process_zipped_nc(file_path)
-
-                    if dataset is not None:
-                        try:
-                            # 提取數據
-                            lon, lat, no2 = self.extract_data(dataset, use_taiwan_mask)
-
-                            # 為每個檔案創建新的網格
-                            lon_grid, lat_grid = self.create_grid(lon, lat)
-
-                            # 插值
-                            no2_grid = DataInterpolator.interpolate(
-                                lon, lat, no2,
-                                lon_grid, lat_grid,
-                                method=self.interpolation_method
-                            )
-
-                            # 創建臨時的 Dataset 來顯示插值後的結果
-                            interpolated_ds = xr.Dataset(
-                                {
-                                    'nitrogendioxide_tropospheric_column': (
-                                        ['time', 'latitude', 'longitude'],
-                                        no2_grid[np.newaxis, :, :]
-                                    )
-                                },
-                                coords={
-                                    'time': dataset.time.values[0:1],  # 使用原始時間
-                                    'latitude': np.squeeze(lat_grid[:, 0]),
-                                    'longitude': np.squeeze(lon_grid[0, :])
-                                }
-                            )
-
-                            # 繪製插值後的數據圖
-                            logger.info("繪製插值後的數據圖...")
-                            plot_global_no2(interpolated_ds, figure_output_file / file_path.stem, close_after=True, map_scale='Taiwan')
-
-                            # 移動到下個月
-                            if month == "12":
-                                current_date = current_date.replace(year=current_date.year + 1, month=1, day=1)
-                            else:
-                                current_date = current_date.replace(month=current_date.month + 1, day=1)
-
-                            # container.append(no2_grid)
-                        finally:
-                            dataset.close()
-
+                    plot_global_var(
+                        dataset=file_path,
+                        product_params=PRODUCT_CONFIGS[file_type],
+                        savefig_path=figure_path,
+                        map_scale='Taiwan',
+                        show_stations=True
+                    )
                 except Exception as e:
-                    logger.error(f"Error processing {file_path.name}: {e}")
+                    logger.error(f"繪製檔案 {file_path.name} 時發生錯誤: {e}")
                     continue
 
-    def _save_monthly_average(self, container, grid, year, month, output_file):
+            # 4. 移至下個月
+            current_date = (current_date + relativedelta(months=1)).replace(day=1)
+
+    @staticmethod
+    def _save_monthly_average(container, grid, year, month, output_file):
         """保存月平均數據"""
         # 計算平均值
         no2_stack = np.stack(container)
@@ -235,9 +256,3 @@ class NO2Processor:
         # 確保輸出目錄存在
         output_file.parent.mkdir(parents=True, exist_ok=True)
         ds_result.to_netcdf(output_file)
-
-        logger.info(f"Saved monthly average to {output_file}")
-        logger.info(f"Final grid shape: {no2_average.shape}")
-        logger.info(f"Time: {ds_result.time.values}")
-        logger.info(f"Longitude range: {grid[0][0].min():.2f} to {grid[0][0].max():.2f}")
-        logger.info(f"Latitude range: {grid[1][:, 0].min():.2f} to {grid[1][:, 0].max():.2f}")

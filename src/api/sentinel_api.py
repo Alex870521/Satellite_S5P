@@ -2,11 +2,11 @@
 import logging
 import time
 import requests
+import zipfile
 import threading
 import multiprocessing
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
 
 from rich.progress import (
     Progress,
@@ -16,10 +16,6 @@ from rich.progress import (
     BarColumn,
     TimeRemainingColumn,
 )
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.align import Align
 
 from src.api.auth import CopernicusAuth
 from src.api.downloader import Downloader
@@ -29,8 +25,10 @@ from src.config.settings import (
     RAW_DATA_DIR,
     DEFAULT_TIMEOUT
 )
+from src.config.richer import console, rich_print, DisplayManager
+from src.config.catalog import ClassInput, TypeInput, PRODUCT_CONFIGS
 
-console = Console(force_terminal=True, color_system="auto", width=130)  # 使用您想要的寬度
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,7 +48,7 @@ class FileProgressColumn(ProgressColumn):
         return f"{completed:5.1f} / {total:5.1f} MB"
 
 
-class Sentinel5PDataFetcher:
+class S5PFetcher:
     def __init__(self, max_workers: int = 5):
         self.auth = CopernicusAuth()
         self.downloader = Downloader()
@@ -62,24 +60,31 @@ class Sentinel5PDataFetcher:
             'failed': 0,
             'skipped': 0,
             'total_size': 0,
+            'actual_download_size': 0,
         }
 
-    def fetch_no2_data(self, start_date: str, end_date: str,
-                       bbox: Optional[Tuple[float, float, float, float]] = None,
-                       limit: Optional[int] = None) -> List[Dict]:
+    def fetch_data(self,
+                   file_class: ClassInput,
+                   file_type: TypeInput,
+                   start_date: str,
+                   end_date: str,
+                   boundary: tuple[float, float, float, float] | None = None,
+                   limit: int | None = None,
+                   ) -> list[dict]:
         """
-        擷取 NO2 數據
+        擷取數據
 
         Args:
+            file_class (ProductClassInput): 資料類型
+            file_type (ProductTypeInput): 資料種類
             start_date: 開始日期 (YYYY-MM-DD)
             end_date: 結束日期 (YYYY-MM-DD)
-            bbox: 邊界框座標 (min_lon, min_lat, max_lon, max_lat)
+            boundary: 邊界框座標 (min_lon, min_lat, max_lon, max_lat)
             limit: 最大結果數量
 
         Returns:
-            List[Dict]: 產品資訊列表
+            list[dict]: 產品資訊列表
         """
-        # logger.info(f"Fetching NO2 data from {start_date} to {end_date}")
 
         try:
             # 取得認證 token
@@ -91,17 +96,22 @@ class Sentinel5PDataFetcher:
                 'Content-Type': 'application/json'
             }
 
+            file_class = '' if file_class == '*' else file_class
+            file_type = '' if file_type == '*' else file_type
+            self.file_type = file_type
+
             # 構建基本篩選條件
             base_filter = (
                 f"Collection/Name eq 'SENTINEL-5P' "
-                f"and contains(Name,'NO2') "
-                f"and ContentDate/Start gt {start_date}T00:00:00.000Z "
-                f"and ContentDate/Start lt {end_date}T23:59:59.999Z"
+                f"and contains(Name,'{file_class}') "
+                f"and contains(Name,'{file_type}') "
+                f"and ContentDate/Start gt '{start_date}T00:00:00.000Z' "
+                f"and ContentDate/Start lt '{end_date}T23:59:59.999Z' "
             )
 
             # 如果提供了邊界框，加入空間篩選
-            if bbox:
-                min_lon, min_lat, max_lon, max_lat = bbox
+            if boundary:
+                min_lon, max_lon, min_lat, max_lat = boundary
                 spatial_filter = (
                     f" and OData.CSC.Intersects(area=geography'SRID=4326;POLYGON(("
                     f"{min_lon} {min_lat}, "
@@ -141,13 +151,12 @@ class Sentinel5PDataFetcher:
                 while True:
                     try:
                         response = requests.get(
-                            f"{self.base_url}/Products",
+                            url=f"{self.base_url}/Products",
                             headers=headers,
                             params=query_params,
                             timeout=DEFAULT_TIMEOUT
                         )
                         response.raise_for_status()
-
                         products = response.json().get('value', [])
                         if not products:
                             break
@@ -173,20 +182,7 @@ class Sentinel5PDataFetcher:
 
             # 顯示產品詳細資訊
             if all_products:
-                table = Table(title=f"Found {len(all_products)} Products")
-                table.add_column("No.", justify="right", style="cyan")
-                table.add_column("Time", style="magenta")
-                table.add_column("Name", style="blue")
-                table.add_column("Size", justify="right", style="green")
-
-                for i, product in enumerate(all_products, 1):
-                    time_str = product.get('ContentDate', {}).get('Start', 'N/A')[:19]
-                    name = product.get('Name', 'N/A')
-                    size = product.get('ContentLength', 0)
-                    size_str = f"{size / 1024 / 1024:.2f} MB"
-                    table.add_row(str(i), time_str, name, size_str)
-
-                console.print(table)
+                DisplayManager().display_products(all_products)
 
             return all_products
 
@@ -194,7 +190,6 @@ class Sentinel5PDataFetcher:
             logger.error(f"Error in fetch_no2_data: {str(e)}")
             raise
 
-    # TODO: main_task count wrong
     def parallel_download(self, products: list):
         """並行下載多個產品"""
         if not products:
@@ -208,7 +203,6 @@ class Sentinel5PDataFetcher:
             task_queue.put(product)
 
         # 創建進度追蹤器
-        import multiprocessing
         completed_files = multiprocessing.Value('i', 0)
         active_threads = multiprocessing.Value('i', 0)
 
@@ -218,6 +212,7 @@ class Sentinel5PDataFetcher:
             'failed': 0,
             'skipped': 0,
             'total_size': sum(p.get('ContentLength', 0) for p in products),
+            'actual_download_size': 0,
             'start_time': time.time()
         })
 
@@ -244,7 +239,7 @@ class Sentinel5PDataFetcher:
                     with progress_lock:
                         progress.update(
                             task_id,
-                            description=f"[cyan]Thread {thread_index + 1}: {file_name}",
+                            description=f"[cyan]Thread {thread_index + 1}: {file_name[:28]}...{file_name[-9:]}",
                             total=file_size,
                             completed=0,
                             visible=True,
@@ -258,13 +253,15 @@ class Sentinel5PDataFetcher:
                             token = self.auth.ensure_valid_token()
                             headers = {'Authorization': f'Bearer {token}'}
 
+                        product_type = self.file_type
                         start_time = product.get('ContentDate', {}).get('Start')
                         date_obj = datetime.strptime(start_time, '%Y-%m-%dT%H:%M:%S.%fZ')
-                        output_dir = Path(RAW_DATA_DIR) / date_obj.strftime('%Y') / date_obj.strftime('%m')
+                        output_dir = Path(RAW_DATA_DIR) / product_type / date_obj.strftime('%Y') / date_obj.strftime('%m')
+
                         output_path = output_dir / file_name
 
                         # 檢查檔案是否已存在
-                        if output_path.exists() and output_path.stat().st_size == file_size:
+                        if output_path.exists() and not zipfile.is_zipfile(output_path):
                             with progress_lock:
                                 progress.update(task_id, completed=file_size)
                             with stats_lock:
@@ -313,12 +310,15 @@ class Sentinel5PDataFetcher:
                         with stats_lock:
                             if download_success:
                                 self.download_stats['success'] += 1
+
                             else:
                                 self.download_stats['failed'] += 1
                                 if output_path.exists():
                                     output_path.unlink()
 
                         success = True
+                        with stats_lock:
+                            self.download_stats['actual_download_size'] += file_size
                         with completed_files.get_lock():
                             completed_files.value += 1
 
@@ -376,6 +376,7 @@ class Sentinel5PDataFetcher:
                 thread.daemon = True
                 threads.append(thread)
                 thread.start()
+                time.sleep(1)
 
             # 監控進度
             while True:
@@ -397,44 +398,4 @@ class Sentinel5PDataFetcher:
             # progress.update(main_task, completed=len(products), refresh=True)
 
             # 顯示下載統計
-            self._display_download_summary()
-
-    def _display_download_summary(self):
-        """顯示下載統計摘要"""
-        elapsed_time = time.time() - self.download_stats['start_time']
-        total_files = (
-            self.download_stats['success'] +
-            self.download_stats['failed'] +
-            self.download_stats['skipped']
-        )
-
-        table = Table(title="Download Summary", width=60, padding=(0, 2), expand=False)
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", justify="right", style="green")
-
-        table.add_row("Total Files", str(total_files))
-        table.add_row("Successfully Downloaded", str(self.download_stats['success']))
-        table.add_row("Failed Downloads", str(self.download_stats['failed']))
-        table.add_row("Skipped Files", str(self.download_stats['skipped']))
-
-        total_size = self.download_stats['total_size']
-        size_str = f"{total_size / 1024 / 1024:.2f} MB"
-        table.add_row("Total Size", size_str)
-        table.add_row("Total Time", f"{elapsed_time:.2f}s")
-
-        if elapsed_time > 0:
-            avg_speed = total_size / elapsed_time
-            speed_str = f"{avg_speed / 1024 / 1024:.2f} MB/s"
-            table.add_row("Average Speed", speed_str)
-
-        # 使用 Align 將 table 置中
-        centered_table = Align.center(table)
-
-        console.print("\n", Panel(
-            centered_table,
-            title="Download Results",
-            width=130,
-            expand=True,
-            border_style="bright_blue",
-            padding=(1, 0)
-        ))
+            DisplayManager().display_download_summary(self.download_stats)

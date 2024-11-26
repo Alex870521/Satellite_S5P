@@ -23,21 +23,25 @@ class CopernicusAuth:
 
     def get_token(self):
         """獲取新的 access token"""
-        data = {
-            'grant_type': 'password',
-            'username': self.username,
-            'password': self.password,
-            'client_id': 'cdse-public'
-        }
+        try:
+            data = {
+                'grant_type': 'password',
+                'username': self.username,
+                'password': self.password,
+                'client_id': 'cdse-public'
+            }
 
-        response = requests.post(COPERNICUS_TOKEN_URL, data=data, timeout=30)
-        response.raise_for_status()
+            response = requests.post(COPERNICUS_TOKEN_URL, data=data, timeout=30)
+            response.raise_for_status()
 
-        token_data = response.json()
-        self.token = token_data['access_token']
-        self.token_expiry = datetime.now() + timedelta(seconds=token_data['expires_in'] - 60)
-        # logger.info("Access token updated")
-        return self.token
+            token_data = response.json()
+            self.token = token_data['access_token']
+            self.token_expiry = datetime.now() + timedelta(seconds=token_data['expires_in'] - 60)
+            # logger.info("Access token updated")
+            return self.token
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error getting token: {e}")
+            raise
 
     def ensure_valid_token(self):
         """確保 token 有效"""
