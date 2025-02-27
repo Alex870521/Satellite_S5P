@@ -21,7 +21,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.XX
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -36,10 +36,10 @@ jobs:
       - name: Run tests with coverage
         run: |
           pytest tests/ -m "not requires_data" \
-          --cov=Satellite_S5P \
-                --cov-report=term-missing \
-                --cov-report=xml \
-                -v
+          --cov=src \
+          --cov-report=term-missing \
+          --cov-report=xml \
+          -v
 
       - name: Upload coverage reports
         uses: actions/upload-artifact@v4
