@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "s5p-processor"
+version = "0.1.0"
+description = "Sentinel-5P 資料處理與視覺化工具"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }
+]
+
+dependencies = [
+    "numpy>=1.26.0",
+    "xarray>=2023.1.0",
+    "scipy>=1.12.0",
+    "matplotlib>=3.7.0",
+    "cartopy>=0.22.0",
+    "geopandas>=0.13.0",
+    "netCDF4>=1.6.0",
+    "pandas>=2.0.0",
+    "shapely>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "flake8>=6.0.0",
+    "black>=23.1.0",
+    "mypy>=1.0.0",
+    "isort>=5.12.0",
+]
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.12"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+disallow_untyped_decorators = false
+no_implicit_optional = true
+strict_optional = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unused_ignores = false

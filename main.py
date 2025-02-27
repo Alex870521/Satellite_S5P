@@ -1,5 +1,6 @@
 """主程式"""
 import logging
+import asyncio
 from datetime import datetime
 
 from src.api.sentinel_api import S5PFetcher
@@ -7,16 +8,17 @@ from src.processing.data_processor import S5Processor
 
 from src.config.richer import rich_print
 from src.config.catalog import ClassInput, TypeInput, PRODUCT_CONFIGS
-from src.config import setup_directory_structure, FILTER_BOUNDARY
+from src.config.setup import setup
+from src.config.settings import FILTER_BOUNDARY
 
 
 logger = logging.getLogger(__name__)
 
 
-def fetch_data(file_class: ClassInput,
-               file_type: TypeInput,
-               start_date: str | datetime,
-               end_date: str | datetime):
+async def fetch_data(file_class: ClassInput,
+                     file_type: TypeInput,
+                     start_date: str | datetime,
+                     end_date: str | datetime):
     """下載數據的工作流程"""
     try:
         rich_print(
@@ -24,7 +26,7 @@ def fetch_data(file_class: ClassInput,
 
         fetcher = S5PFetcher(max_workers=3)
 
-        products = fetcher.fetch_data(
+        products = await fetcher.fetch_data(
             file_class=file_class,
             file_type=file_type,
             start_date=start_date,
@@ -61,8 +63,8 @@ def process_data(file_class: ClassInput,
                 f"正在處理 sentinel-5p 衛星數據 ({PRODUCT_CONFIGS[file_type].display_name}) from {start_date} to {end_date} ...")
 
             processor = S5Processor(
-                interpolation_method='kdtree',
-                resolution=0.02,
+                interpolation_method='rbf',
+                resolution=(5.5, 3.5),
                 mask_qc_value=0.5
             )
 
@@ -84,21 +86,23 @@ def process_data(file_class: ClassInput,
 
 
 def main():
-    # 設定參數
-    start, end = '2024-03-01', '2024-03-02'
+    # 步驟：
+    # 1. 前往src.config.settings中更改輸出路徑（硬碟路徑）
+    # 2. 設定參數
+    start, end = '2022-01-01', '2022-01-31'
     file_class: ClassInput = 'OFFL'
     file_type: TypeInput = 'NO2___'
 
-    # 設定輸入輸出配置
-    setup_directory_structure(file_type=file_type, start_date=start, end_date=end)
+    # 3. 設定輸入輸出配置
+    setup(file_type=file_type, start_date=start, end_date=end)
 
-    # 下載數據
-    # fetch_data(file_class=file_class, file_type=file_type, start_date=start, end_date=end)
+    # 4. 下載數據 (需要有.env 內含 COPERNICUS 帳號密碼才能用)
+    # asyncio.run(fetch_data(file_class=file_class, file_type=file_type, start_date=start, end_date=end))
 
-    # 處理與繪製數據
+    # 5. 處理與繪製數據
     process_data(file_class=file_class, file_type=file_type, start_date=start, end_date=end)
 
-    # 動畫
+    # 6. 動畫
     # animate_data(file_type=file_type, start_date=start, end_date=end)
 
 

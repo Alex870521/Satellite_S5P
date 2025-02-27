@@ -18,11 +18,13 @@ DEFAULT_TIMEOUT = 60
 DOWNLOAD_TIMEOUT = 180
 
 # 存儲路徑
-BASE_DIR = Path("/Users/chanchihyu/Sentinel-5P")
+BASE_DIR = Path("/Volumes/Transcend/Sentinel-5P")
 RAW_DATA_DIR = BASE_DIR / "raw"
 PROCESSED_DATA_DIR = BASE_DIR / "processed"
+GEOTIFF_DIR = BASE_DIR / "geotiff"
 FIGURE_DIR = BASE_DIR / "figure"
 LOGS_DIR = BASE_DIR / "logs"
 
-FILTER_BOUNDARY = (120, 122, 22, 25.5)   # (118, 124, 20, 27)
+# 地理範圍設定
+FILTER_BOUNDARY = (120, 122, 22, 25)  # (118, 124, 20, 27)
 FIGURE_BOUNDARY = (119, 123, 21, 26)  # (100, 145, 0, 45)

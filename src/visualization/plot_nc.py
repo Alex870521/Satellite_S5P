@@ -13,6 +13,7 @@ from matplotlib.ticker import ScalarFormatter, FixedLocator
 
 from src.config.settings import FIGURE_BOUNDARY
 from src.config.richer import DisplayManager
+from src.config.catalog import PRODUCT_CONFIGS
 
 
 plt.rcParams['mathtext.fontset'] = 'custom'
@@ -90,13 +91,14 @@ def plot_stations(ax, stations: list[str], label_offset: tuple[float, float] = (
               borderaxespad=0.)
 
 
-def plot_global_var(dataset: Path | str,
+def plot_global_var(dataset: xr.Dataset | Path | str,
                     product_params,
                     show_info: bool = True,
                     savefig_path=None,
                     map_scale: Literal['global', 'Taiwan'] = 'global',
                     show_stations: bool = False,
                     mark_stations: list = ['古亭', '楠梓', '鳳山'],
+                    mark_rectangle: bool = False,
                     ):
     """
     在全球地圖上繪製 var 分布圖
@@ -115,16 +117,26 @@ def plot_global_var(dataset: Path | str,
             raise NotImplementedError
 
         if show_info:
-            lon = ds.longitude[0].values
-            lat = ds.latitude[0].values
-            var = ds[product_params.dataset_name][0].values
+            if 'ground_pixel' not in ds._coord_names:
+                lon = ds.longitude.values
+                lat = ds.latitude.values
 
-            nc_info = {'file_name': dataset.name if isinstance(dataset, Path) else '',
-                       'time': np.datetime64(ds.time.values[0], 'D'),
-                       'shape': ds.latitude[0].values.shape,
-                       'latitude': f'{np.nanmin(lat):.2f} to {np.nanmax(lat):.2f}',
-                       'longitude': f'{np.nanmin(lon):.2f} to {np.nanmax(lon):.2f}',
-                       }
+                nc_info = {'file_name': dataset.name if isinstance(dataset, Path) else '',
+                           'time': np.datetime64(ds.time.values[0], 'D'),
+                           'shape': f'{len(ds.latitude.values)}, {len(ds.longitude.values)}',
+                           'latitude': f'{np.nanmin(lat):.2f} to {np.nanmax(lat):.2f}',
+                           'longitude': f'{np.nanmin(lon):.2f} to {np.nanmax(lon):.2f}',
+                           }
+            else:
+                lon = ds.longitude[0].values
+                lat = ds.latitude[0].values
+
+                nc_info = {'file_name': dataset.name if isinstance(dataset, Path) else '',
+                           'time': np.datetime64(ds.time.values[0], 'D'),
+                           'shape': ds.latitude[0].values.shape,
+                           'latitude': f'{np.nanmin(lat):.2f} to {np.nanmax(lat):.2f}',
+                           'longitude': f'{np.nanmin(lon):.2f} to {np.nanmax(lon):.2f}',
+                           }
 
             DisplayManager().display_product_info(nc_info)
 
@@ -179,13 +191,12 @@ def plot_global_var(dataset: Path | str,
         if show_stations and mark_stations:
             plot_stations(ax, mark_stations)
 
-
         else:
             # 添加地圖特徵
             ax.add_feature(cfeature.BORDERS.with_scale('10m'), linestyle=':')
-            ax.add_feature(cfeature.COASTLINE.with_scale('10m'))
-            ax.add_feature(cfeature.LAND.with_scale('10m'), alpha=0.1)
-            ax.add_feature(cfeature.OCEAN.with_scale('10m'), alpha=0.1)
+            # ax.add_feature(cfeature.COASTLINE.with_scale('10m'))
+            # ax.add_feature(cfeature.LAND.with_scale('10m'), alpha=0.1)
+            # ax.add_feature(cfeature.OCEAN.with_scale('10m'), alpha=0.1)
 
         # 設定網格線
         gl = ax.gridlines(draw_labels=True, linestyle='--', alpha=0.7)
@@ -194,18 +205,19 @@ def plot_global_var(dataset: Path | str,
         gl.xlocator = FixedLocator([119, 120, 121, 122, 123])  # 設定經度刻度
 
         # 用矩形標記數據範圍
-        lon_min, lon_max = float(np.nanmin(ds.longitude)), float(np.nanmax(ds.longitude))
-        lat_min, lat_max = float(np.nanmin(ds.latitude)), float(np.nanmax(ds.latitude))
-        rect = plt.Rectangle(
-            (lon_min, lat_min),
-            lon_max - lon_min,
-            lat_max - lat_min,
-            fill=False,
-            color='red',
-            transform=ccrs.PlateCarree(),
-            linewidth=2
-        )
-        ax.add_patch(rect)
+        if mark_rectangle:
+            lon_min, lon_max = float(np.nanmin(ds.longitude)), float(np.nanmax(ds.longitude))
+            lat_min, lat_max = float(np.nanmin(ds.latitude)), float(np.nanmax(ds.latitude))
+            rect = plt.Rectangle(
+                (lon_min, lat_min),
+                lon_max - lon_min,
+                lat_max - lat_min,
+                fill=False,
+                color='red',
+                transform=ccrs.PlateCarree(),
+                linewidth=2
+            )
+            ax.add_patch(rect)
 
         # 設定標題
         time_str = np.datetime64(dataset.time.values, 'D').astype(str)
@@ -224,61 +236,93 @@ def plot_global_var(dataset: Path | str,
         raise
 
 
-def platecarree_plot(dataset, product_params, zoom=True, path=None, **kwargs):
-    fig, ax = plt.subplots(figsize=(7, 6), subplot_kw={'projection': ccrs.PlateCarree()})
+def plot_map(dataset, product_params,
+             projection_type: Literal['platecarree', 'orthographic'] = 'platecarree',
+             zoom: bool = False,
+             path: Path | None = None,
+             **kwargs):
+    """繪製地圖"""
+    # 設置投影
+    if projection_type == 'orthographic':
+        projection = ccrs.Orthographic(120, 25)
+        figsize = (8, 6)
+    else:  # platecarree
+        projection = ccrs.PlateCarree()
+        figsize = (7, 6)
 
+    # 創建圖表
+    fig, ax = plt.subplots(figsize=figsize, subplot_kw={'projection': projection})
+
+    # 設置範圍和網格
     if zoom:
-        # 添加經緯度網格線和標籤
         ax.set_extent([119, 123, 21, 26], crs=ccrs.PlateCarree())
-        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1, color='gray', alpha=0.5)
+        gl = ax.gridlines(draw_labels=True, linewidth=1, color='gray', alpha=0.5)
         gl.xlocator = plt.FixedLocator([119, 120, 121, 122, 123])
         gl.top_labels = gl.right_labels = False
     else:
         ax.set_global()
-        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1, color='gray', alpha=0.5)
-        gl.top_labels = gl.right_labels = False
+        if projection_type == 'platecarree':
+            gl = ax.gridlines(draw_labels=True, linewidth=1, color='gray', alpha=0.5)
+            gl.top_labels = gl.right_labels = False
 
+    # 增加海岸線
+    ax.coastlines(resolution='10m')
+
+    # 繪製數據
     var = product_params.dataset_name
+    data = dataset[var][0]
 
-    plot = dataset[var][0].plot.pcolormesh(ax=ax, x='longitude', y='latitude', add_colorbar=False, cmap='jet', vmin=0,
-                                           vmax=1.4e-4)
-    cbar = plt.colorbar(plot, ax=ax, shrink=1, pad=0.05)
-    cbar.set_label(r'$\bf NO_{2}\ mole/m^2$')
+    if projection_type == 'platecarree':
+        plot = data.plot.pcolormesh(
+            ax=ax,
+            x='longitude',
+            y='latitude',
+            add_colorbar=False,
+            cmap='jet',
+            vmin=0,
+            vmax=1.4e-4,
+            transform=ccrs.PlateCarree()
+        )
+        # 添加 colorbar
+        cbar = plt.colorbar(plot, ax=ax, shrink=1, pad=0.05)
+        cbar.set_label(r'$\bf NO_{2}\ mole/m^2$')
 
-    # 设置colorbar刻度标签格式为科学记数法
-    formatter = ScalarFormatter(useMathText=True)
-    formatter.set_scientific(True)
-    formatter.set_powerlimits((-2, 2))  # 可以調整使用科學記號的範圍
+        # 設置 colorbar 格式
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_scientific(True)
+        formatter.set_powerlimits((-2, 2))
+        cbar.formatter = formatter
+    else:
+        plot = data.plot.pcolormesh(
+            ax=ax,
+            x='longitude',
+            y='latitude',
+            add_colorbar=False,
+            cmap='jet',
+            transform=ccrs.PlateCarree(),
+            vmin=data.min()
+        )
+        cbar = plt.colorbar(plot, ax=ax, shrink=1, pad=0.05)
+        cbar.set_label(r'$\bf NO_{2}\ mole/m^2$')
 
-    plt.title(kwargs.get('title'))
+    if 'title' in kwargs:
+        plt.title(kwargs['title'])
+
     if path is not None:
         fig.savefig(path)
-    plt.show()
 
-
-def orthographic_plot(dataset, product_params):
-    projection = ccrs.Orthographic(120, 25)
-    fig, ax = plt.subplots(figsize=(8, 6), subplot_kw={'projection': projection})
-
-    var = product_params.dataset_name
-    vmin = dataset[var][0].min()
-
-    dataset[var][0].plot.pcolormesh(ax=ax, x='longitude', y='latitude',
-                                    add_colorbar=True, cmap='jet',
-                                    transform=ccrs.PlateCarree(),
-                                    vmin=vmin)
-
-    ax.set_global()
-    ax.coastlines(resolution='10m')
     plt.show()
 
 
 if __name__ == "__main__":
-    file_group = '/Users/chanchihyu/Sentinel-5P/raw/NO2___/2024/03/S5P_OFFL_L2__NO2____20240314T031823_20240314T045953_33252_03_020600_20240315T192700.nc'
-    file_ungroup = '/Users/chanchihyu/Sentinel-5P/processed/NO2___/2024/01/S5P_OFFL_L2__NO2____20240110T045402_20240110T063532_32345_03_020600_20240111T211523.nc'
+    file_group = '/Volumes/Transcend/Sentinel-5P/raw/NO2___/2024/03/S5P_OFFL_L2__NO2____20240314T031823_20240314T045953_33252_03_020600_20240315T192700.nc'
+    file_ungroup = '/Volumes/Transcend/Sentinel-5P/processed/NO2___/2024/01/S5P_OFFL_L2__NO2____20240110T045402_20240110T063532_32345_03_020600_20240111T211523.nc'
     ds = xr.open_dataset(file_ungroup)
 
     from netCDF4 import Dataset
     nc = Dataset(file_ungroup, 'r').groups
 
-    # plot_global_var(file)
+    file = '/Volumes/Transcend/Sentinel-5P/raw/NO2___/2022/01/S5P_OFFL_L2__NO2____20220122T041706_20220122T055836_22158_02_020301_20220123T201801.nc'
+    plot_global_var(file, product_params=PRODUCT_CONFIGS['NO2___'], map_scale='Taiwan')
+    # plot_map(ds, product_params=PRODUCT_CONFIGS['NO2___'], projection_type='platecarree')
+    # plot_map(ds, product_params=PRODUCT_CONFIGS['NO2___'], projection_type='orthographic')

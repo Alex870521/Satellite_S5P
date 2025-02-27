@@ -1,6 +1,8 @@
 """Sentinel-5P API 操作"""
 import logging
 import time
+
+import aiohttp
 import requests
 import zipfile
 import threading
@@ -63,7 +65,7 @@ class S5PFetcher:
             'actual_download_size': 0,
         }
 
-    def fetch_data(self,
+    async def fetch_data(self,
                    file_class: ClassInput,
                    file_type: TypeInput,
                    start_date: str,
@@ -85,6 +87,7 @@ class S5PFetcher:
         Returns:
             list[dict]: 產品資訊列表
         """
+        start_time = time.time()  # 開始計時
 
         try:
             # 取得認證 token
@@ -133,58 +136,67 @@ class S5PFetcher:
             all_products = []
 
             # 使用進度條顯示資料擷取進度
-            with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[bold blue]{task.description}"),
-                    BarColumn(bar_width=106),
-                    FileProgressColumn(),
-                    TimeRemainingColumn(),
-                    console=console,
-                    transient=True,
-                    expand=True
-            ) as progress:
-                fetch_task = progress.add_task(
-                    "[cyan]Fetching products...",
-                    total=None
-                )
+            async with aiohttp.ClientSession() as session:  # 使用異步 HTTP 客戶端
+                with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[bold blue]{task.description}"),
+                        BarColumn(bar_width=106),
+                        FileProgressColumn(),
+                        TimeRemainingColumn(),
+                        console=console,
+                        transient=True,
+                        expand=True
+                ) as progress:
+                    fetch_task = progress.add_task(
+                        "[cyan]Fetching products...",
+                        total=None
+                    )
 
-                while True:
-                    try:
-                        response = requests.get(
-                            url=f"{self.base_url}/Products",
-                            headers=headers,
-                            params=query_params,
-                            timeout=DEFAULT_TIMEOUT
-                        )
-                        response.raise_for_status()
-                        products = response.json().get('value', [])
-                        if not products:
-                            break
+                    while True:
+                        try:
+                            # 使用異步 HTTP 請求
+                            async with session.get(
+                                    url=f"{self.base_url}/Products",
+                                    headers=headers,
+                                    params=query_params,
+                                    timeout=DEFAULT_TIMEOUT
+                            ) as response:
+                                # 異步讀取響應
+                                response_data = await response.json()
+                                products = response_data.get('value', [])
 
-                        all_products.extend(products)
-                        progress.update(
-                            fetch_task,
-                            description=f"[cyan]Found {len(all_products)} products..."
-                        )
+                                if not products:
+                                    break
 
-                        if limit and len(all_products) >= limit:
-                            all_products = all_products[:limit]
-                            break
+                                all_products.extend(products)
 
-                        query_params['$skip'] += len(products)
+                            progress.update(
+                                fetch_task,
+                                description=f"[cyan]Found {len(all_products)} products..."
+                            )
 
-                    except requests.exceptions.RequestException as e:
-                        logger.error(f"Error fetching products: {str(e)}")
-                        if len(all_products) > 0:
-                            logger.info("Returning partially fetched products")
-                            break
-                        raise
+                            if limit and len(all_products) >= limit:
+                                all_products = all_products[:limit]
+                                break
 
-            # 顯示產品詳細資訊
-            if all_products:
-                DisplayManager().display_products(all_products)
+                            query_params['$skip'] += len(products)
 
-            return all_products
+                        except Exception as e:
+                            logger.error(f"Error fetching products: {str(e)}")
+                            if len(all_products) > 0:
+                                logger.info("Returning partially fetched products")
+                                break
+                            raise
+
+                # 顯示產品詳細資訊
+                if all_products:
+                    DisplayManager().display_products(all_products)
+
+                end_time = time.time()  # 結束計時
+                duration = end_time - start_time
+                print(f"Fetch operation completed in {duration:.2f} seconds")
+
+                return all_products
 
         except Exception as e:
             logger.error(f"Error in fetch_no2_data: {str(e)}")

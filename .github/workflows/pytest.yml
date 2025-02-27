@@ -10,7 +10,7 @@ jobs:
   test:
     strategy:
       matrix:
-        python-version: [ "3.11", "3.12" ]
+        python-version: ["3.12"]
         os: [ ubuntu-latest ]
 
       fail-fast: false
@@ -36,7 +36,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           pytest tests/ -m "not requires_data" \
-          --cov=AeroViz \
+          --cov=Satellite_S5P \
                 --cov-report=term-missing \
                 --cov-report=xml \
                 -v
