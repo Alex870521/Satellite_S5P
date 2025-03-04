@@ -6,7 +6,7 @@ import threading
 
 # 導入你的處理模組
 from src.api.sentinel_api import S5PFetcher
-from src.config import setup_directory_structure
+# from src.config import setup_directory_structure
 
 
 class SatelliteApp:
@@ -136,7 +136,7 @@ class SatelliteApp:
             data_mode = self.data_mode.get()
 
             self.log_message(f"開始處理數據：{start_str} 到 {end_str}")
-            setup_directory_structure(start_str, end_str)
+            # setup_directory_structure(start_str, end_str)
 
             fetcher = S5PFetcher(max_workers=3)
 

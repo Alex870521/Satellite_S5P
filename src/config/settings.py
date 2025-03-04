@@ -28,3 +28,7 @@ LOGS_DIR = BASE_DIR / "logs"
 # 地理範圍設定
 FILTER_BOUNDARY = (120, 122, 22, 25)  # (118, 124, 20, 27)
 FIGURE_BOUNDARY = (119, 123, 21, 26)  # (100, 145, 0, 45)
+
+# 數據保留天數設定
+# 在使用pipeline下，超過這個天數的檔案將被自動清理
+DATA_RETENTION_DAYS = 7  # 預設保留7天

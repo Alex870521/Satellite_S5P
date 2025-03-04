@@ -89,7 +89,7 @@ def main():
     # 步驟：
     # 1. 前往src.config.settings中更改輸出路徑（硬碟路徑）
     # 2. 設定參數
-    start, end = '2022-01-01', '2022-01-31'
+    start, end = '2022-01-01', '2024-12-31'
     file_class: ClassInput = 'OFFL'
     file_type: TypeInput = 'NO2___'
 

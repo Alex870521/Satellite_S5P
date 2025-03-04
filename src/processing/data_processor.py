@@ -237,6 +237,8 @@ class S5Processor:
 
             current_date = (current_date + relativedelta(months=1)).replace(day=1)
 
+        return True
+
     def _process_files(self, paths: dict):
         """處理原始檔案"""
         for file_path in paths['input'].glob(self.file_pattern):

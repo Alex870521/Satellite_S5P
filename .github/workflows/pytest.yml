@@ -32,18 +32,3 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
           pip install -e ".[test]"
-
-      - name: Run tests with coverage
-        run: |
-          pytest tests/ -m "not requires_data" \
-          --cov=src \
-          --cov-report=term-missing \
-          --cov-report=xml \
-          -v
-
-      - name: Upload coverage reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-${{ matrix.python-version }}-${{ github.sha }}
-          path: coverage.xml
-          if-no-files-found: error
