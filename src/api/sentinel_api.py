@@ -66,13 +66,13 @@ class S5PFetcher:
         }
 
     async def fetch_data(self,
-                   file_class: ClassInput,
-                   file_type: TypeInput,
-                   start_date: str,
-                   end_date: str,
-                   boundary: tuple[float, float, float, float] | None = None,
-                   limit: int | None = None,
-                   ) -> list[dict]:
+                        file_class: ClassInput,
+                        file_type: TypeInput,
+                        start_date: str,
+                        end_date: str,
+                        boundary: tuple[float, float, float, float] | None = None,
+                        limit: int | None = None,
+                        ) -> list[dict]:
         """
         擷取數據
 

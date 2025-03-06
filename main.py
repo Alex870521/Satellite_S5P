@@ -22,7 +22,7 @@ async def fetch_data(file_class: ClassInput,
     """下載數據的工作流程"""
     try:
         rich_print(
-            f"正在獲取 sentinel-5p 衛星數據 ({PRODUCT_CONFIGS[file_type].display_name}) from {start_date} to {end_date} ...")
+            f"Fetching sentinel-5p products ({PRODUCT_CONFIGS[file_type].display_name}) from {start_date} to {end_date} ...")
 
         fetcher = S5PFetcher(max_workers=3)
 
@@ -36,18 +36,18 @@ async def fetch_data(file_class: ClassInput,
         )
 
         if products:
-            if rich_print("是否要下載數據？", confirm=True):
+            if rich_print("Do you want to download data？", confirm=True):
                 rich_print(
-                    f"開始下載 sentinel-5p 衛星數據 ({PRODUCT_CONFIGS[file_type].display_name}) from {start_date} to {end_date} ...")
+                    f"Start download sentinel-5p products ({PRODUCT_CONFIGS[file_type].display_name}) from {start_date} to {end_date} ...")
                 fetcher.parallel_download(products)
-                rich_print("數據下載完成！")
+                rich_print("Data download completed！")
             else:
-                rich_print("已取消下載操作")
+                rich_print("Download canceled")
         else:
-            rich_print("找不到符合條件的數據")
+            rich_print("No data matching the criteria was found")
 
     except Exception as e:
-        error_message = f"下載數據失敗: {str(e)}"
+        error_message = f"Failed to download data: {str(e)}"
         rich_print(error_message)
         logger.error(error_message)
 
@@ -58,9 +58,9 @@ def process_data(file_class: ClassInput,
                  end_date: str | datetime):
     """處理數據的工作流程"""
     try:
-        if rich_print("是否要處理數據？", confirm=True):
+        if rich_print("Do you want to process the data？", confirm=True):
             rich_print(
-                f"正在處理 sentinel-5p 衛星數據 ({PRODUCT_CONFIGS[file_type].display_name}) from {start_date} to {end_date} ...")
+                f"Processing sentinel-5p products ({PRODUCT_CONFIGS[file_type].display_name}) from {start_date} to {end_date} ...")
 
             processor = S5Processor(
                 interpolation_method='rbf',
@@ -75,12 +75,12 @@ def process_data(file_class: ClassInput,
                 end_date=end_date,
             )
 
-            rich_print("數據完成處理")
+            rich_print("Data processing completed")
         else:
-            rich_print("已取消處理操作")
+            rich_print("Processing canceled")
 
     except Exception as e:
-        error_message = f"處理數據失敗: {str(e)}"
+        error_message = f"Failed to process data: {str(e)}"
         rich_print(error_message)
         logger.error(error_message)
 
@@ -89,7 +89,7 @@ def main():
     # 步驟：
     # 1. 前往src.config.settings中更改輸出路徑（硬碟路徑）
     # 2. 設定參數
-    start, end = '2022-01-01', '2024-12-31'
+    start, end = '2025-02-20', '2025-03-06'
     file_class: ClassInput = 'OFFL'
     file_type: TypeInput = 'NO2___'
 
@@ -97,7 +97,7 @@ def main():
     setup(file_type=file_type, start_date=start, end_date=end)
 
     # 4. 下載數據 (需要有.env 內含 COPERNICUS 帳號密碼才能用)
-    # asyncio.run(fetch_data(file_class=file_class, file_type=file_type, start_date=start, end_date=end))
+    asyncio.run(fetch_data(file_class=file_class, file_type=file_type, start_date=start, end_date=end))
 
     # 5. 處理與繪製數據
     process_data(file_class=file_class, file_type=file_type, start_date=start, end_date=end)

@@ -25,15 +25,7 @@ today = datetime.now().strftime('%Y-%m-%d')
 # 設定輸入輸出配置
 setup(file_type='NO2___', start_date=today, end_date=today)
 
-# 設定日誌
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOGS_DIR / 'satellite_pipeline.log'),
-        logging.StreamHandler()
-    ]
-)
+
 logger = logging.getLogger(__name__)
 
 
@@ -117,7 +109,7 @@ def clean_old_files():
         retention_manager = FileRetentionManager(retention_days=DATA_RETENTION_DAYS)
 
         # 定義要清理的檔案類型（這裡可以根據實際情況調整）
-        file_types = ['NO2___', 'SO2___', 'O3__PR', 'HCHO__', 'CO____']
+        file_types = ['NO2___', 'HCHO__', 'CO____']
 
         # 執行清理，只針對FIGURE_DIR中的檔案
         results = retention_manager.clean_satellite_figure_data(BASE_DIR, file_types)
@@ -143,7 +135,7 @@ async def daily_task():
     # 設定參數 - 只處理當天的數據
     today = datetime.now().strftime('%Y-%m-%d')
     file_class: ClassInput = 'NRTI'
-    file_type: list[TypeInput] = ['NO2___', 'SO2___', 'O3__PR', 'HCHO__', 'CO____']
+    file_type: list[TypeInput] = ['NO2___', 'HCHO__', 'CO____']
 
     for file_tp in file_type:
         # 設定輸入輸出配置

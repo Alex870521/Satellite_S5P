@@ -1,5 +1,8 @@
 """API 設定和常數"""
 from pathlib import Path
+import os
+import certifi
+os.environ['SSL_CERT_FILE'] = certifi.where()
 
 # API URLs
 COPERNICUS_TOKEN_URL = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
@@ -18,7 +21,7 @@ DEFAULT_TIMEOUT = 60
 DOWNLOAD_TIMEOUT = 180
 
 # 存儲路徑
-BASE_DIR = Path("/Volumes/Transcend/Sentinel-5P")
+BASE_DIR = Path("/Users/chanchihyu/DataCenter/Satellite")
 RAW_DATA_DIR = BASE_DIR / "raw"
 PROCESSED_DATA_DIR = BASE_DIR / "processed"
 GEOTIFF_DIR = BASE_DIR / "geotiff"
