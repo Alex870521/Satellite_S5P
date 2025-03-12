@@ -1,15 +1,19 @@
 from pathlib import Path
 from datetime import datetime
 import logging
+from typing import Literal
+
 from dateutil.relativedelta import relativedelta
 
-from src.config.settings import RAW_DATA_DIR, PROCESSED_DATA_DIR, GEOTIFF_DIR, FIGURE_DIR, LOGS_DIR
+from src.config.settings import (RAW_DATA_DIR, PROCESSED_DATA_DIR, GEOTIFF_DIR, FIGURE_DIR, LOGS_DIR,
+                                 MODIS_RAW_DATA_DIR, MODIS_PROCESSED_DATA_DIR, MODIS_FIGURE_DIR, MODIS_LOGS_DIR)
+
 from src.config.catalog import TypeInput
 
 
-def setup_logging():
+def setup_logging(log_dir: Path):
     """設置日誌配置"""
-    log_file = LOGS_DIR / f"Satellite_S5P_{datetime.now().strftime('%Y%m')}.log"
+    log_file = log_dir / f"Satellite_S5P_{datetime.now().strftime('%Y%m')}.log"
 
     logging.basicConfig(
         level=logging.INFO,
@@ -47,7 +51,7 @@ def setup(file_type: TypeInput,
             directory.mkdir(parents=True, exist_ok=True)
 
         # 2. 設置日誌
-        setup_logging()
+        setup_logging(LOGS_DIR)
         logger = logging.getLogger(__name__)
         logger.info("Setting up project environment...")
 
@@ -65,6 +69,39 @@ def setup(file_type: TypeInput,
         logging.error(f"Setup failed: {str(e)}")
         raise
 
+def setup_nasa(file_type: Literal['MOD04', 'MYD04', 'MCD04'],
+               start_date: str | datetime,
+               end_date: str | datetime) -> None:
+    """設置整個專案環境
+
+    Args:
+        file_type: 檔案類型
+        start_date: 開始日期
+        end_date: 結束日期
+    """
+    try:
+        # 1. 建立基本目錄
+        for directory in [MODIS_RAW_DATA_DIR, MODIS_PROCESSED_DATA_DIR, MODIS_FIGURE_DIR, MODIS_LOGS_DIR]:
+            directory.mkdir(parents=True, exist_ok=True)
+
+        # 2. 設置日誌
+        setup_logging(MODIS_LOGS_DIR)
+        logger = logging.getLogger(__name__)
+        logger.info("Setting up project environment...")
+
+        # 3. 解析日期
+        start = start_date if isinstance(start_date, datetime) else datetime.strptime(start_date, '%Y-%m-%d')
+        end = end_date if isinstance(end_date, datetime) else datetime.strptime(end_date, '%Y-%m-%d')
+
+        # 4. 建立資料目錄結構
+        for base_dir in [MODIS_RAW_DATA_DIR, MODIS_PROCESSED_DATA_DIR, MODIS_FIGURE_DIR]:
+            create_date_folders(base_dir, file_type, start, end)
+
+        logger.info(f"Setup completed for {file_type} from {start.date()} to {end.date()}")
+
+    except Exception as e:
+        logging.error(f"Setup failed: {str(e)}")
+        raise
 
 """ I/O structure
 Main Folder (Sentinel_data)

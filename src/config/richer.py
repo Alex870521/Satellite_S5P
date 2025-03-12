@@ -1,4 +1,8 @@
+import re
 import time
+from datetime import datetime
+from pathlib import Path
+
 from rich.console import Console
 from rich.prompt import Confirm
 from rich.panel import Panel
@@ -101,6 +105,64 @@ class DisplayManager:
 
         # 顯示面板
         panel = self.create_centered_panel(table, f"Found {len(products)} Products")
+        self.console.print(panel)
+
+    def display_products_nasa(self, products):
+        """顯示 NASA Earthdata 產品簡潔資訊表格"""
+        table = Table(title="NASA MODIS AOD Products")
+
+        # 設定簡化的欄位
+        columns = [
+            ("No.", "right", "cyan"),
+            ("Date", "center", "magenta"),
+            ("Time", "center", "bright_magenta"),
+            ("File Name", "left", "blue"),
+            ("Size", "right", "green")
+        ]
+
+        for col_name, justify, style in columns:
+            table.add_column(col_name, justify=justify, style=style)
+
+        # 遍歷每個產品
+        for i, product in enumerate(products, 1):
+            try:
+                # 將產品轉換為字符串以進行解析
+                product_str = str(product)
+
+                # 提取時間信息
+                time_match = re.search(r"BeginningDateTime': '([^']+)'", product_str)
+                if time_match:
+                    begin_time = time_match.group(1)
+                    dt = datetime.strptime(begin_time[:19], "%Y-%m-%dT%H:%M:%S")
+                    date_str = dt.strftime("%Y-%m-%d")
+                    time_str = dt.strftime("%H:%M")
+                else:
+                    date_str = "N/A"
+                    time_str = "N/A"
+
+                # 提取檔案大小
+                size_match = re.search(r"Size\(MB\): ([0-9.]+)", product_str)
+                size_str = f"{float(size_match.group(1)):.2f} MB" if size_match else "N/A"
+
+                # 提取檔案名稱
+                file_match = re.search(r"Data: \['[^']*/([^/]+\.hdf)", product_str)
+                if file_match:
+                    file_name = file_match.group(1)
+                    # 處理過長的名稱
+                    if len(file_name) > 40:
+                        file_name = f"{file_name[:25]}...{file_name[-12:]}"
+                else:
+                    file_name = "N/A"
+
+                # 添加行
+                table.add_row(str(i), date_str, time_str, file_name, size_str)
+
+            except Exception as e:
+                # 發生錯誤時添加錯誤信息行
+                table.add_row(str(i), "Error", "Error", f"Error: {str(e)[:30]}", "N/A")
+
+        # 顯示面板
+        panel = self.create_centered_panel(table, f"Found {len(products)} NASA MODIS Products")
         self.console.print(panel)
 
     def display_download_summary(self, stats):

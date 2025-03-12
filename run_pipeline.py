@@ -6,14 +6,16 @@
 import logging
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import schedule
 
 from src.api.sentinel_api import S5PFetcher
 from src.processing.data_processor import S5Processor
 from src.config.catalog import ClassInput, TypeInput, PRODUCT_CONFIGS
-from src.config.setup import setup
+from src.config.setup import setup, setup_nasa
 from src.config.settings import FILTER_BOUNDARY, DATA_RETENTION_DAYS, LOGS_DIR, BASE_DIR
+
+from main_earthdata import fetch_data, process_data
 
 # 導入檔案保留管理器
 from file_retention_manager import FileRetentionManager
@@ -134,25 +136,50 @@ async def daily_task():
 
     # 設定參數 - 只處理當天的數據
     today = datetime.now().strftime('%Y-%m-%d')
+    two_days_ago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+    seven_days_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+
+    # 開始執行 Sentinel-5P
     file_class: ClassInput = 'NRTI'
     file_type: list[TypeInput] = ['NO2___', 'HCHO__', 'CO____']
 
     for file_tp in file_type:
         # 設定輸入輸出配置
-        setup(file_type=file_tp, start_date=today, end_date=today)
+        setup(file_type=file_tp, start_date=two_days_ago, end_date=today)
 
         # 檢查並下載當天的數據
-        has_data = await fetch_data_auto(file_class=file_class, file_type=file_tp, start_date=today, end_date=today)
+        has_data = await fetch_data_auto(file_class=file_class, file_type=file_tp, start_date=two_days_ago, end_date=today)
 
         # 如果有數據，則處理並繪製
         if has_data:
-            success = process_data_auto(file_class=file_class, file_type=file_tp, start_date=today, end_date=today)
+            success = process_data_auto(file_class=file_class, file_type=file_tp, start_date=two_days_ago, end_date=today)
             if success:
                 logger.info(f"每日衛星數據處理pipeline執行完成 - {today}")
             else:
                 logger.error(f"處理數據失敗 - {today}")
         else:
             logger.info(f"今日({today})無可用的衛星數據")
+
+    # 開始執行 MODIS
+    file_type: list[str] = ['MYD04', 'MOD04']
+
+    for file_tp in file_type:
+        # 設定輸入輸出配置
+        setup_nasa(file_type=file_tp, start_date=seven_days_ago, end_date=today)
+
+        # 檢查並下載當天的數據
+        has_data = await fetch_data(file_type=file_tp, start_date=seven_days_ago, end_date=today)
+
+        # 如果有數據，則處理並繪製
+        if has_data:
+            success = process_data(file_type=file_tp, start_date=seven_days_ago, end_date=today)
+            if success:
+                logger.info(f"每日衛星數據處理pipeline執行完成 - {today}")
+            else:
+                logger.error(f"處理數據失敗 - {today}")
+        else:
+            logger.info(f"今日({today})無可用的衛星數據")
+
 
     # 執行舊檔案清理任務
     # logger.info("執行舊檔案清理任務")

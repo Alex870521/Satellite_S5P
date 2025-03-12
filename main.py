@@ -89,8 +89,8 @@ def main():
     # 步驟：
     # 1. 前往src.config.settings中更改輸出路徑（硬碟路徑）
     # 2. 設定參數
-    start, end = '2025-02-20', '2025-03-06'
-    file_class: ClassInput = 'OFFL'
+    start, end = '2025-03-01', '2025-03-13'
+    file_class: ClassInput = 'NRTI'
     file_type: TypeInput = 'NO2___'
 
     # 3. 設定輸入輸出配置
