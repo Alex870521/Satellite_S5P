@@ -22,5 +22,7 @@ pytest~=8.3.4
 tkcalendar~=1.6.1
 certifi~=2024.8.30
 schedule~=1.2.2
+cdsapi~=0.7.5
+sentinelsat~=1.2.1
 earthaccess~=0.14.0
 pyhdf~=0.11.6

@@ -11,7 +11,7 @@ from rich.align import Align
 
 
 # 定義常數
-PANEL_WIDTH = 100
+PANEL_WIDTH = 120
 
 console = Console(force_terminal=True, color_system="auto", width=PANEL_WIDTH)  # 使用您想要的寬度
 

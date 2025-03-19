@@ -1,23 +1,17 @@
-"""src/processing/no2_processor.py"""
-import logging
 import numpy as np
 import xarray as xr
-import rioxarray
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from pathlib import Path
 
 from src.processing.interpolators import DataInterpolator
 from src.processing.grid_frame import GridFrame
-from src.config.settings import RAW_DATA_DIR, PROCESSED_DATA_DIR, FIGURE_DIR, GEOTIFF_DIR, FIGURE_BOUNDARY
+from src.config.settings import FIGURE_BOUNDARY
 from src.config.catalog import ClassInput, TypeInput, PRODUCT_CONFIGS
-from src.config.richer import DisplayManager
 from src.visualization.plot_nc import plot_global_var
 
-logger = logging.getLogger(__name__)
 
-
-class S5Processor:
+class SentinelProcessor:
     def __init__(self, interpolation_method='kdtree', resolution=(5.5, 3.5), mask_qc_value=0.75):
         """初始化處理器
 
@@ -30,6 +24,12 @@ class S5Processor:
         mask_qc_value : float
             QA 值的閾值
         """
+        self.raw_dir = None
+        self.processed_dir = None
+        self.figure_dir = None
+        self.geotiff_dir = None
+        self.logger = None
+
         self.interpolation_method = interpolation_method
         self.resolution = resolution
         self.mask_qc_value = mask_qc_value
@@ -91,7 +91,7 @@ class S5Processor:
             if interpolated_ds is not None:
                 self._save_outputs(interpolated_ds, file_path, output_dir, geotiff_dir)
         except Exception as e:
-            logger.error(f"Error processing file {file_path.name}: {str(e)}")
+            self.logger.error(f"Error processing file {file_path.name}: {str(e)}")
         finally:
             ds.close()
 
@@ -104,7 +104,7 @@ class S5Processor:
             # 2. 提取數據
             mask_dataset, lon, lat, var = self.extract_data(ds, extract_range=FIGURE_BOUNDARY)
             if any(x is None for x in [lon, lat, var]):
-                logger.error("Failed to extract data")
+                self.logger.error("Failed to extract data")
                 return None
 
             # 觀察不同q_value下的原始圖
@@ -126,7 +126,7 @@ class S5Processor:
             region_mask = mask_lon & mask_lat
 
             if not np.any(region_mask) or np.all(np.isnan(var[region_mask])):
-                logger.info(f"No valid data in specified region {self.lat_range}, {self.lon_range}")
+                self.logger.info(f"No valid data in specified region {self.lat_range}, {self.lon_range}")
 
                 try:
                     # 直接從原始檔案路徑獲取年月信息
@@ -136,21 +136,21 @@ class S5Processor:
 
                     # 構建要清理的路徑
                     clean_paths = {
-                        'raw_data': RAW_DATA_DIR / self.product_type / year / month / f"{file_name}.nc",
-                        'output': PROCESSED_DATA_DIR / self.product_type / year / month / f"{file_name}.nc",
-                        'figure': FIGURE_DIR / self.product_type / year / month / f"{file_path.stem}.png",
-                        'geotiff': GEOTIFF_DIR / self.product_type / year / month / f"{file_path.stem}.tiff"
+                        'raw_data': self.raw_dir / self.product_type / year / month / f"{file_name}.nc",
+                        'output': self.processed_dir / self.product_type / year / month / f"{file_name}.nc",
+                        'figure': self.figure_dir / self.product_type / year / month / f"{file_path.stem}.png",
+                        'geotiff': self.geotiff_dir / self.product_type / year / month / f"{file_path.stem}.tiff"
                     }
 
                     # 刪除對應的檔案
                     for path_type, file_path_to_delete in clean_paths.items():
                         if file_path_to_delete.exists():
                             file_path_to_delete.unlink()
-                            logger.info(f"刪除 {path_type} 檔案: {file_path_to_delete}")
+                            self.logger.info(f"刪除 {path_type} 檔案: {file_path_to_delete}")
 
-                    logger.info(f"清理完成: 沒有區域內的有效數據")
+                    self.logger.info(f"清理完成: 沒有區域內的有效數據")
                 except Exception as e:
-                    logger.error(f"清理檔案時出錯: {e}")
+                    self.logger.error(f"清理檔案時出錯: {e}")
 
                 return None
 
@@ -186,7 +186,7 @@ class S5Processor:
                 }
             )
         except Exception as e:
-            logger.error(f"Error in data processing: {str(e)}")
+            self.logger.error(f"Error in data processing: {str(e)}")
             return None
 
     def _save_outputs(self, ds: xr.Dataset, file_path: Path, output_dir: Path, geotiff_dir: Path):
@@ -203,15 +203,24 @@ class S5Processor:
             # logger.info(f"Saved GeoTIFF to {output_tiff_path}")
 
         except Exception as e:
-            logger.error(f"Error saving outputs: {str(e)}")
+            self.logger.error(f"Error saving outputs: {str(e)}")
 
     def process_each_data(self, file_class: ClassInput, file_type: TypeInput,
                           start_date: str, end_date: str):
         """處理指定日期範圍內的衛星數據，限定於23.5N-25N, 120E-122E區域"""
         self.product_type = file_type
         self.file_pattern = f"*{file_class}_L2__{file_type}*.nc"
-        self.start = datetime.strptime(start_date, '%Y-%m-%d')
-        self.end = datetime.strptime(end_date, '%Y-%m-%d')
+
+        # 處理日期格式：接受字符串或datetime對象
+        if isinstance(start_date, str):
+            self.start = datetime.strptime(start_date, '%Y-%m-%d')
+        else:
+            self.start = start_date
+
+        if isinstance(end_date, str):
+            self.end = datetime.strptime(end_date, '%Y-%m-%d')
+        else:
+            self.end = end_date
         current_date = self.start
 
         while current_date <= self.end:
@@ -219,10 +228,10 @@ class S5Processor:
 
             # 設置目錄
             paths = {
-                'input': RAW_DATA_DIR / file_type / year / month,
-                'output': PROCESSED_DATA_DIR / file_type / year / month,
-                'figure': FIGURE_DIR / file_type / year / month,
-                'geotiff': GEOTIFF_DIR / file_type / year / month
+                'input': self.raw_dir / file_type / year / month,
+                'output': self.processed_dir / file_type / year / month,
+                'figure': self.figure_dir / file_type / year / month,
+                'geotiff': self.geotiff_dir / file_type / year / month
             }
 
             # 創建目錄
@@ -251,7 +260,7 @@ class S5Processor:
             try:
                 self.process_single_file(file_path, paths['output'], paths['geotiff'])
             except Exception as e:
-                logger.error(f"處理檔案 {file_path.name} 時發生錯誤: {e}")
+                self.logger.error(f"處理檔案 {file_path.name} 時發生錯誤: {e}")
 
     def _create_figures(self, paths: dict):
         """創建圖表"""
@@ -271,7 +280,7 @@ class S5Processor:
                     map_scale='Taiwan',
                 )
             except Exception as e:
-                logger.error(f"繪製檔案 {file_path.name} 時發生錯誤: {e}")
+                self.logger.error(f"繪製檔案 {file_path.name} 時發生錯誤: {e}")
 
     def save_as_tiff(self, ds: xr.Dataset, output_path: Path) -> None:
         """將 NetCDF 數據集中的 NO2 數值儲存為 GeoTIFF"""
@@ -292,4 +301,4 @@ class S5Processor:
             )
 
         except Exception as e:
-            logger.error(f"Error saving TIFF file {output_path}: {str(e)}")
+            self.logger.error(f"Error saving TIFF file {output_path}: {str(e)}")

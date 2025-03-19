@@ -1,9 +1,9 @@
 """Copernicus API 認證處理"""
 import os
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
 import requests
 import logging
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from src.config.settings import COPERNICUS_TOKEN_URL
 
@@ -12,14 +12,15 @@ logger = logging.getLogger(__name__)
 
 class CopernicusAuth:
     def __init__(self):
-        load_dotenv()
+        if not os.getenv('COPERNICUS_USERNAME') or not os.getenv('COPERNICUS_PASSWORD'):
+            raise EnvironmentError(
+                "Missing COPERNICUS credentials. Please set COPERNICUS_USERNAME and COPERNICUS_PASSWORD environment variables"
+            )
+
         self.username = os.getenv('COPERNICUS_USERNAME')
         self.password = os.getenv('COPERNICUS_PASSWORD')
         self.token = None
         self.token_expiry = None
-
-        if not self.username or not self.password:
-            raise ValueError("Missing Copernicus credentials in .env file")
 
     def get_token(self):
         """獲取新的 access token"""

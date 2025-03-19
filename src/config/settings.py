@@ -1,7 +1,11 @@
 """API 設定和常數"""
-from pathlib import Path
 import os
 import certifi
+from pathlib import Path
+from dotenv import load_dotenv
+
+
+load_dotenv()
 os.environ['SSL_CERT_FILE'] = certifi.where()
 
 # API URLs
@@ -23,24 +27,44 @@ DOWNLOAD_TIMEOUT = 180
 # 存儲路徑
 BASE_DIR = Path("/Users/chanchihyu/DataCenter/Satellite")
 
-SENTINEL5P_DATA_BASE_DIR = BASE_DIR / 'Sentinel-5P'
-MODIS_DATA_BASE_DIR = BASE_DIR / 'MODIS'
-
-RAW_DATA_DIR = SENTINEL5P_DATA_BASE_DIR / "raw"
-PROCESSED_DATA_DIR = SENTINEL5P_DATA_BASE_DIR / "processed"
-GEOTIFF_DIR = SENTINEL5P_DATA_BASE_DIR / "geotiff"
-FIGURE_DIR = SENTINEL5P_DATA_BASE_DIR / "figure"
-LOGS_DIR = SENTINEL5P_DATA_BASE_DIR / "logs"
-
-MODIS_RAW_DATA_DIR = MODIS_DATA_BASE_DIR / "raw"
-MODIS_PROCESSED_DATA_DIR = MODIS_DATA_BASE_DIR / "processed"
-MODIS_FIGURE_DIR = MODIS_DATA_BASE_DIR / "figure"
-MODIS_LOGS_DIR = MODIS_DATA_BASE_DIR / "logs"
-
-# 地理範圍設定
+# 地理範圍設定 (min_lon, max_lon, min_lat, max_lat)
 FILTER_BOUNDARY = (120, 122, 22, 25)  # (118, 124, 20, 27)
 FIGURE_BOUNDARY = (119, 123, 21, 26)  # (100, 145, 0, 45)
 
 # 數據保留天數設定
 # 在使用pipeline下，超過這個天數的檔案將被自動清理
-DATA_RETENTION_DAYS = 7  # 預設保留7天
+DATA_RETENTION_DAYS = 30  # 預設保留30天
+
+
+""" I/O structure
+Main Folder (Sentinel_data)
+├── figure
+│   ├── NO2
+│   │   ├── 2023
+│   │   │   ├── 01
+│   │   │   └── ...
+│   │   └── 2024
+│   │       ├── 01
+│   │       └── ...
+│   └── ...
+├── logs
+│   └── Satellite_S5P_202411.log
+├── processed
+│   ├── NO2
+│   │   ├── 2023
+│   │   │   ├── 01
+│   │   │   └── ...
+│   │   └── 2024
+│   │       ├── 01
+│   │       └── ...
+│   └── ...
+└── raw
+    ├── NO2
+    │   ├── 2023
+    │   │   ├── 01
+    │   │   └── ...
+    │   └── 2024
+    │       ├── 01
+    │       └── ...
+    └── ...
+"""

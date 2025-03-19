@@ -1,8 +1,6 @@
-"""Sentinel-5P API 操作"""
-import logging
+import os
 import time
-
-import aiohttp
+import aiohttp  # 異步操作
 import requests
 import zipfile
 import threading
@@ -24,14 +22,13 @@ from src.api.downloader import Downloader
 from src.config.settings import (
     COPERNICUS_BASE_URL,
     COPERNICUS_DOWNLOAD_URL,
-    RAW_DATA_DIR,
     DEFAULT_TIMEOUT
 )
-from src.config.richer import console, rich_print, DisplayManager
+from src.config.richer import console, DisplayManager
 from src.config.catalog import ClassInput, TypeInput, PRODUCT_CONFIGS
-
-
-logger = logging.getLogger(__name__)
+from src.api.core import SatelliteHub
+from src.processing import SentinelProcessor
+from sentinelsat import SentinelAPI
 
 
 class FileProgressColumn(ProgressColumn):
@@ -50,8 +47,14 @@ class FileProgressColumn(ProgressColumn):
         return f"{completed:5.1f} / {total:5.1f} MB"
 
 
-class S5PFetcher:
+class SENTINEL5PHub(SatelliteHub):
+    # API name
+    name = "Sentinel-5P"
+
     def __init__(self, max_workers: int = 5):
+        super().__init__()
+        self._processor = None  # 初始化為 None，延遲創建
+
         self.auth = CopernicusAuth()
         self.downloader = Downloader()
         self.base_url = COPERNICUS_BASE_URL
@@ -65,14 +68,21 @@ class S5PFetcher:
             'actual_download_size': 0,
         }
 
-    async def fetch_data(self,
-                        file_class: ClassInput,
-                        file_type: TypeInput,
-                        start_date: str,
-                        end_date: str,
-                        boundary: tuple[float, float, float, float] | None = None,
-                        limit: int | None = None,
-                        ) -> list[dict]:
+    def authentication(self):
+        if not os.getenv('COPERNICUS_USERNAME') or not os.getenv('COPERNICUS_PASSWORD'):
+            raise EnvironmentError(
+                "Missing COPERNICUS credentials. Please set COPERNICUS_USERNAME and COPERNICUS_PASSWORD environment variables"
+            )
+        return SentinelAPI(os.getenv('COPERNICUS_USERNAME'), os.getenv('COPERNICUS_PASSWORD'))
+
+    def fetch_data(self,
+                   file_class: str | ClassInput,
+                   file_type: str | TypeInput,
+                   start_date: str | datetime,
+                   end_date: str | datetime,
+                   boundary: tuple[float, float, float, float] | None = None,
+                   limit: int | None = None,
+                   ) -> list[dict]:
         """
         擷取數據
 
@@ -81,13 +91,14 @@ class S5PFetcher:
             file_type (ProductTypeInput): 資料種類
             start_date: 開始日期 (YYYY-MM-DD)
             end_date: 結束日期 (YYYY-MM-DD)
-            boundary: 邊界框座標 (min_lon, min_lat, max_lon, max_lat)
+            boundary: Geographic boundary (min_lon, max_lon, min_lat, max_lat)
             limit: 最大結果數量
 
         Returns:
             list[dict]: 產品資訊列表
         """
-        start_time = time.time()  # 開始計時
+        self.file_class = file_class
+        self.start_date, self.end_date = self._normalize_time_inputs(start_date, end_date, set_timezone=False)
 
         try:
             # 取得認證 token
@@ -108,8 +119,8 @@ class S5PFetcher:
                 f"Collection/Name eq 'SENTINEL-5P' "
                 f"and contains(Name,'{file_class}') "
                 f"and contains(Name,'{file_type}') "
-                f"and ContentDate/Start gt '{start_date}T00:00:00.000Z' "
-                f"and ContentDate/Start lt '{end_date}T23:59:59.999Z' "
+                f"and ContentDate/Start gt '{self.start_date.strftime('%Y-%m-%d')}T00:00:00.000Z' "
+                f"and ContentDate/Start lt '{self.end_date.strftime('%Y-%m-%d')}T23:59:59.999Z' "
             )
 
             # 如果提供了邊界框，加入空間篩選
@@ -136,7 +147,7 @@ class S5PFetcher:
             all_products = []
 
             # 使用進度條顯示資料擷取進度
-            async with aiohttp.ClientSession() as session:  # 使用異步 HTTP 客戶端
+            with requests.Session() as session:  # 使用同步 HTTP 客戶端
                 with Progress(
                         SpinnerColumn(),
                         TextColumn("[bold blue]{task.description}"),
@@ -155,14 +166,14 @@ class S5PFetcher:
                     while True:
                         try:
                             # 使用異步 HTTP 請求
-                            async with session.get(
+                            with session.get(
                                     url=f"{self.base_url}/Products",
                                     headers=headers,
                                     params=query_params,
                                     timeout=DEFAULT_TIMEOUT
                             ) as response:
                                 # 異步讀取響應
-                                response_data = await response.json()
+                                response_data = response.json()
                                 products = response_data.get('value', [])
 
                                 if not products:
@@ -182,9 +193,9 @@ class S5PFetcher:
                             query_params['$skip'] += len(products)
 
                         except Exception as e:
-                            logger.error(f"Error fetching products: {str(e)}")
+                            self.logger.error(f"Error fetching products: {str(e)}")
                             if len(all_products) > 0:
-                                logger.info("Returning partially fetched products")
+                                self.logger.info("Returning partially fetched products")
                                 break
                             raise
 
@@ -192,20 +203,22 @@ class S5PFetcher:
                 if all_products:
                     DisplayManager().display_products(all_products)
 
-                end_time = time.time()  # 結束計時
-                duration = end_time - start_time
-                print(f"Fetch operation completed in {duration:.2f} seconds")
-
                 return all_products
 
         except Exception as e:
-            logger.error(f"Error in fetch_no2_data: {str(e)}")
+            self.logger.error(f"Error in fetch_no2_data: {str(e)}")
             raise
 
-    def parallel_download(self, products: list):
-        """並行下載多個產品"""
+    def download_data(self, products: list, show_progress=False):
+        """
+        並行下載多個產品
+
+        Parameters:
+            products (list): 要下載的產品列表
+            show_progress (bool): 是否顯示進度條，默認為True
+        """
         if not products:
-            logger.warning("No products to download")
+            self.logger.warning("No products to download")
             return
 
         # 使用 Queue 來管理下載任務
@@ -247,16 +260,20 @@ class S5PFetcher:
                     file_size = product.get('ContentLength', 0)
                     file_name = product.get('Name')
 
-                    # 更新進度條顯示當前任務
-                    with progress_lock:
-                        progress.update(
-                            task_id,
-                            description=f"[cyan]Thread {thread_index + 1}: {file_name[:28]}...{file_name[-9:]}",
-                            total=file_size,
-                            completed=0,
-                            visible=True,
-                            refresh=True
-                        )
+                    # 更新進度條顯示當前任務 (如果啟用進度條)
+                    if show_progress and progress:
+                        with progress_lock:
+                            progress.update(
+                                task_id,
+                                description=f"[cyan]Thread {thread_index + 1}: {file_name[:28]}...{file_name[-9:]}",
+                                total=file_size,
+                                completed=0,
+                                visible=True,
+                                refresh=True
+                            )
+                    else:
+                        # 不使用進度條時，使用日誌記錄進度
+                        self.logger.info(f"Thread {thread_index + 1}: Downloading {file_name}")
 
                     success = False  # 用於追蹤是否需要呼叫 task_done()
                     try:
@@ -268,14 +285,19 @@ class S5PFetcher:
                         product_type = self.file_type
                         start_time = product.get('ContentDate', {}).get('Start')
                         date_obj = datetime.strptime(start_time, '%Y-%m-%dT%H:%M:%S.%fZ')
-                        output_dir = Path(RAW_DATA_DIR) / product_type / date_obj.strftime('%Y') / date_obj.strftime('%m')
+                        output_dir = self.raw_dir / product_type / date_obj.strftime('%Y') / date_obj.strftime('%m')
+                        output_dir.mkdir(parents=True, exist_ok=True)
 
                         output_path = output_dir / file_name
 
                         # 檢查檔案是否已存在
                         if output_path.exists() and not zipfile.is_zipfile(output_path):
-                            with progress_lock:
-                                progress.update(task_id, completed=file_size)
+                            if show_progress and progress:
+                                with progress_lock:
+                                    progress.update(task_id, completed=file_size)
+                            else:
+                                self.logger.info(f"File already exists, skipping: {file_name}")
+
                             with stats_lock:
                                 self.download_stats['skipped'] += 1
                             with completed_files.get_lock():
@@ -284,24 +306,29 @@ class S5PFetcher:
                             task_queue.task_done()
                             continue
 
-                        output_dir.mkdir(parents=True, exist_ok=True)
                         product_id = product.get('Id')
                         download_url = f"{COPERNICUS_DOWNLOAD_URL}({product_id})/$value"
 
                         def update_progress(downloaded_bytes):
                             current_progress = min(downloaded_bytes, file_size)
-                            with progress_lock:
-                                progress.update(task_id, completed=current_progress, refresh=True)
+                            if show_progress and progress:
+                                with progress_lock:
+                                    progress.update(task_id, completed=current_progress, refresh=True)
+                            # 不使用進度條時，可以定期輸出日誌 (可選，這可能產生大量日誌)
+                            # else:
+                            #     if downloaded_bytes % (file_size // 10) < (file_size // 100):  # 每10%記錄一次
+                            #         percent = int(downloaded_bytes / file_size * 100)
+                            #         self.logger.info(f"Download progress for {file_name}: {percent}%")
 
                         # 執行下載
                         download_success = False
                         for attempt in range(3):
                             try:
-                                if self.downloader.download_file(
+                                if self.downloader.download_data(
                                         download_url,
                                         headers,
                                         output_path,
-                                        progress_callback=update_progress
+                                        progress_callback=update_progress if show_progress else None
                                 ):
                                     download_success = True
                                     break
@@ -313,7 +340,7 @@ class S5PFetcher:
                                         headers = {'Authorization': f'Bearer {token}'}
 
                             except Exception as e:
-                                logger.error(f"Download attempt {attempt + 1} failed for {file_name}: {str(e)}")
+                                self.logger.error(f"Download attempt {attempt + 1} failed for {file_name}: {str(e)}")
                                 if attempt < 2:
                                     time.sleep(5)
                                 continue
@@ -322,9 +349,10 @@ class S5PFetcher:
                         with stats_lock:
                             if download_success:
                                 self.download_stats['success'] += 1
-
+                                self.logger.info(f"Successfully downloaded: {file_name}")
                             else:
                                 self.download_stats['failed'] += 1
+                                self.logger.error(f"Failed to download: {file_name}")
                                 if output_path.exists():
                                     output_path.unlink()
 
@@ -335,7 +363,7 @@ class S5PFetcher:
                             completed_files.value += 1
 
                     except Exception as e:
-                        logger.error(f"Error downloading {file_name}: {str(e)}")
+                        self.logger.error(f"Error downloading {file_name}: {str(e)}")
                         with stats_lock:
                             self.download_stats['failed'] += 1
                         with completed_files.get_lock():
@@ -344,70 +372,159 @@ class S5PFetcher:
                         if 'output_path' in locals() and output_path.exists():
                             output_path.unlink()
                     finally:
-                        with progress_lock:
-                            progress.update(task_id, visible=False, refresh=True)
+                        if show_progress and progress:
+                            with progress_lock:
+                                progress.update(task_id, visible=False, refresh=True)
                         if not success:
                             task_queue.task_done()
 
             finally:
                 with active_threads.get_lock():
                     active_threads.value -= 1
-                with progress_lock:
-                    progress.update(task_id, visible=False, refresh=True)
+                if show_progress and progress:
+                    with progress_lock:
+                        progress.update(task_id, visible=False, refresh=True)
 
-        with Progress(
-                SpinnerColumn(),
-                TextColumn("[bold blue]{task.description}"),
-                BarColumn(complete_style="green"),
-                FileProgressColumn(),
-                TimeRemainingColumn(),
-                console=console,
-                expand=False,
-                transient=False
-        ) as progress:
-            # 創建主進度條
-            main_task = progress.add_task("[green]Overall Progress", total=len(products))
+        # 根據是否顯示進度條執行不同的下載方式
+        if show_progress:
+            # 使用 rich 庫的進度條
+            with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[bold blue]{task.description}"),
+                    BarColumn(complete_style="green"),
+                    FileProgressColumn(),
+                    TimeRemainingColumn(),
+                    console=console,
+                    expand=False,
+                    transient=False
+            ) as progress:
+                # 創建主進度條
+                main_task = progress.add_task("[green]Overall Progress", total=len(products))
 
-            # 創建執行緒的進度條
-            sub_tasks = []
-            for i in range(self.max_workers):
-                task_id = progress.add_task(
-                    f"[cyan]Thread {i + 1}: Waiting for download...",
-                    total=100,
-                    visible=True
-                )
-                sub_tasks.append(task_id)
+                # 創建執行緒的進度條
+                sub_tasks = []
+                for i in range(self.max_workers):
+                    task_id = progress.add_task(
+                        f"[cyan]Thread {i + 1}: Waiting for download...",
+                        total=100,
+                        visible=True
+                    )
+                    sub_tasks.append(task_id)
+
+                # 啟動下載執行緒
+                threads = []
+                for i, task_id in enumerate(sub_tasks):
+                    thread = threading.Thread(
+                        target=download_files,
+                        args=(progress, task_id, i, completed_files, task_queue)
+                    )
+                    thread.daemon = True
+                    threads.append(thread)
+                    thread.start()
+                    time.sleep(1)
+
+                # 監控進度
+                while True:
+                    current_completed = completed_files.value
+                    progress.update(main_task, completed=current_completed)
+
+                    if (task_queue.empty() and
+                            current_completed >= len(products) and
+                            active_threads.value == 0):
+                        break
+
+                    time.sleep(0.1)
+
+                # 確保所有進度條都被清理
+                for task_id in sub_tasks:
+                    progress.update(task_id, visible=False)
+
+                # 顯示下載統計
+                DisplayManager().display_download_summary(self.download_stats)
+        else:
+            # 不使用進度條，簡單的日誌輸出
+            self.logger.info(f"Starting download of {len(products)} files...")
 
             # 啟動下載執行緒
             threads = []
-            for i, task_id in enumerate(sub_tasks):
+            for i in range(self.max_workers):
                 thread = threading.Thread(
                     target=download_files,
-                    args=(progress, task_id, i, completed_files, task_queue)
+                    args=(None, None, i, completed_files, task_queue)
                 )
                 thread.daemon = True
                 threads.append(thread)
                 thread.start()
-                time.sleep(1)
 
-            # 監控進度
+            # 等待下載完成
+            total_files = len(products)
             while True:
                 current_completed = completed_files.value
-                progress.update(main_task, completed=current_completed)
-
-                if (task_queue.empty() and
-                        current_completed >= len(products) and
-                        active_threads.value == 0):
+                if task_queue.empty() and current_completed >= total_files and active_threads.value == 0:
                     break
 
-                time.sleep(0.1)
+                # 定期輸出總體進度
+                self.logger.info(f"Overall progress: {current_completed}/{total_files} files completed")
+                time.sleep(5)  # 每5秒輸出一次總體進度
 
-            # 確保所有進度條都被清理
-            for task_id in sub_tasks:
-                progress.update(task_id, visible=False)
+            # 顯示下載統計摘要
+            self.logger.info(f"Download completed: {self.download_stats['success']} successful, "
+                             f"{self.download_stats['failed']} failed, {self.download_stats['skipped']} skipped")
 
-            # 確保主進度條顯示完成
-            # progress.update(main_task, completed=len(products), refresh=True)
+            # 如果有顯示管理器，也顯示完整統計
+            if hasattr(self, 'display_manager'):
+                self.display_manager.display_download_summary(self.download_stats)
 
-            # 顯示下載統計
-            DisplayManager().display_download_summary(self.download_stats)
+    @property
+    def processor(self):
+        """延遲創建並返回SentinelProcessor實例"""
+        if self._processor is None:
+            # 確保file_type已被設置
+            if not hasattr(self, 'file_type'):
+                raise ValueError("未設置file_type，請先呼叫fetch_data方法")
+
+            # 創建處理器實例
+            self._processor = SentinelProcessor()
+
+            # 設置路徑
+            self._processor.raw_dir = self.raw_dir
+            self._processor.processed_dir = self.processed_dir
+            self._processor.figure_dir = self.figure_dir
+            self._processor.geotiff_dir = self.geotiff_dir
+            self._processor.logger = self.logger
+
+        return self._processor
+
+    def process_data(self, file_class=None, file_type=None, start_date=None, end_date=None):
+        """處理下載的Sentinel-5P數據並生成可視化圖像"""
+        if not hasattr(self, 'file_class'):
+            raise ValueError("未設置file_class，請先呼叫fetch_data方法")
+
+        # 確保file_type已被設置
+        if not hasattr(self, 'file_type'):
+            raise ValueError("未設置file_type，請先呼叫fetch_data方法")
+
+        # 使用類屬性作為默認值
+        if file_class is None:
+            file_class = self.file_class
+        if file_type is None:
+            file_type = self.file_type
+        if start_date is None:
+            start_date = self.start_date
+        if end_date is None:
+            end_date = self.end_date
+
+        # 準備日期範圍字符串用於日誌
+        if start_date or end_date:
+            date_range_str = f"日期範圍: {start_date if start_date else '最早'} 至 {end_date if end_date else '最新'}"
+        else:
+            date_range_str = "處理所有日期的數據"
+
+        self.logger.info(f"開始處理Sentinel-5P數據，{date_range_str}")
+
+        # 使用處理器處理所有文件
+        return self.processor.process_each_data(file_class, file_type, start_date, end_date)
+
+
+if __name__ == '__main__':
+    sentinel_api = SentinelAPI(os.getenv('COPERNICUS_USERNAME'), os.getenv('COPERNICUS_PASSWORD'))

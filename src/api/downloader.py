@@ -1,16 +1,8 @@
-"""檔案下載處理"""
-import os
 import requests
 import logging
 import zipfile
-
-from pathlib import Path
-from tqdm import tqdm
-
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-from src.config.settings import RETRY_SETTINGS, CHUNK_SIZE, DOWNLOAD_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +18,7 @@ class Downloader:
         )
         self.session.mount('https://', requests.adapters.HTTPAdapter(max_retries=self._retries))
 
-    def download_file(self, url, headers, output_path, progress_callback=None):
+    def download_data(self, url, headers, output_path, progress_callback=None):
         """下載檔案並更新進度
 
         Args:

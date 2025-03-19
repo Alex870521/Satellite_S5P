@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.ticker import FixedLocator
 from pyhdf.SD import SD, SDC
-from src.config.settings import FIGURE_BOUNDARY, FILTER_BOUNDARY, MODIS_RAW_DATA_DIR, MODIS_FIGURE_DIR
+from src.config.settings import FIGURE_BOUNDARY, FILTER_BOUNDARY
 
 
 plt.rcParams['mathtext.fontset'] = 'custom'
@@ -31,25 +31,16 @@ class MODISProcessor:
 
     def __init__(self, file_type):
         """初始化處理器"""
-        self.download_dir = MODIS_RAW_DATA_DIR
-        self.figure_dir = MODIS_FIGURE_DIR
+        self.raw_dir = None
+        self.processed_dir = None
+        self.figure_dir = None
+        self.logger = None
+
         self.file_type = file_type
 
         # 預設參數
         self.filter_boundary = FILTER_BOUNDARY  # 過濾數據的邊界
         self.figure_boundary = FIGURE_BOUNDARY  # 圖像顯示的邊界
-
-        # 組合數據儲存
-        self.combined_data = None
-        self.combined_lat = None
-        self.combined_lon = None
-        self.combined_count = 0  # 跟踪合併的文件數
-
-    def find_hdf_files(self, pattern="**/*.hdf"):
-        """尋找所有 HDF 文件"""
-        hdf_files = [f for f in self.download_dir.glob(pattern) if not f.name.startswith("._")]
-        print(f"找到 {len(hdf_files)} 個有效的 HDF 文件")
-        return hdf_files
 
     def extract_date_from_filename(self, filename):
         """從文件名提取日期"""
@@ -68,12 +59,12 @@ class MODISProcessor:
         else:
             return None, file_basename
 
-    def process_hdf_file(self, hdf_file, save_individual=True, add_to_combined=True):
+    def process_hdf_file(self, hdf_file, save_individual=True):
         """處理單個 HDF 文件"""
         try:
             # 從文件名提取日期
             file_date, _ = self.extract_date_from_filename(hdf_file)
-            print(f"\n處理文件: {Path(hdf_file).name} ({file_date.strftime('%Y-%m-%d')})")
+            self.logger.info(f"處理文件: {Path(hdf_file).name} ({file_date.strftime('%Y-%m-%d')})")
 
             # 打開 HDF 文件
             hdf = SD(str(hdf_file), SDC.READ)
@@ -83,12 +74,14 @@ class MODISProcessor:
 
             # 嘗試獲取 AOD 數據集
             aod_name = 'Image_Optical_Depth_Land_And_Ocean'
+            # aod_name = 'AOD_550_Dark_Target_Deep_Blue_Combined'
+
             if aod_name not in datasets:
-                print(f"  數據集 {aod_name} 未找到，嘗試 'Optical_Depth_Land_And_Ocean'")
+                self.logger.info(f"  數據集 {aod_name} 未找到，嘗試 'Optical_Depth_Land_And_Ocean'")
                 aod_name = 'Optical_Depth_Land_And_Ocean'
 
                 if aod_name not in datasets:
-                    print(f"  數據集 {aod_name} 也未找到，跳過此文件")
+                    self.logger.info(f"  數據集 {aod_name} 也未找到，跳過此文件")
                     return False
 
             # 獲取 AOD 數據
@@ -102,7 +95,7 @@ class MODISProcessor:
 
             # 確保經緯度和 AOD 數據的形狀一致
             if aod_data.shape != latitude.shape or aod_data.shape != longitude.shape:
-                print(f"  數據形狀不一致: AOD {aod_data.shape}, Lat {latitude.shape}, Lon {longitude.shape}")
+                self.logger.info(f"  數據形狀不一致: AOD {aod_data.shape}, Lat {latitude.shape}, Lon {longitude.shape}")
 
                 # 獲取最小的形狀維度
                 min_shape = [min(dim) for dim in zip(aod_data.shape, latitude.shape, longitude.shape)]
@@ -112,15 +105,15 @@ class MODISProcessor:
                     aod_data = aod_data[:min_shape[0], :min_shape[1]]
                     latitude = latitude[:min_shape[0], :min_shape[1]]
                     longitude = longitude[:min_shape[0], :min_shape[1]]
-                    print(f"  調整後的形狀: AOD {aod_data.shape}, Lat {latitude.shape}, Lon {longitude.shape}")
+                    self.logger.info(f"  調整後的形狀: AOD {aod_data.shape}, Lat {latitude.shape}, Lon {longitude.shape}")
                 else:
-                    print(f"  無法調整數據形狀，跳過此文件")
+                    self.logger.warning(f"  無法調整數據形狀，跳過此文件")
                     return False
 
             # 從屬性獲取比例因子
             scale_factor = aod_attrs.get('scale_factor', 0.001)
             _FillValue = aod_attrs.get('_FillValue', -9999)
-            print(f"  比例因子: {scale_factor.__round__(5)}, 填充值: {_FillValue}")
+            # self.logger.info(f"  比例因子: {scale_factor.__round__(5)}, 填充值: {_FillValue}")
 
             # 應用比例因子並處理缺失值
             aod_data = aod_data.astype(float)
@@ -138,10 +131,10 @@ class MODISProcessor:
 
             # 檢查過濾區域中是否有數據
             if np.sum(taiwan_mask & valid_mask) == 0:
-                print(f"  該文件在過濾區域中沒有有效的 AOD 數據。")
+                self.logger.debug(f"  該文件在過濾區域中沒有有效的 AOD 數據。")
                 return False
 
-            print(f"  在過濾區域中找到有效數據。")
+            self.logger.debug(f"  在過濾區域中找到有效數據。")
 
             # 生成單獨的圖像
             if save_individual and file_date:
@@ -163,7 +156,7 @@ class MODISProcessor:
             return True
 
         except Exception as e:
-            print(f"  處理文件時發生錯誤: {e}")
+            self.logger.info(f"  處理文件時發生錯誤: {e}")
             return False
 
     def _create_aod_map(self, aod_data, latitude, longitude, title, output_file,
@@ -233,21 +226,81 @@ class MODISProcessor:
             plt.savefig(output_path, dpi=600)
             plt.close()
 
-            print(f"  已保存 AOD 地圖: {output_path}")
+            self.logger.info(f"  已保存 AOD 地圖: {output_path}")
             return True
 
         except Exception as e:
-            print(f"  創建地圖時發生錯誤: {e}")
+            self.logger.error(f"  創建地圖時發生錯誤: {e}")
             return False
 
+    def find_hdf_files(self, pattern="**/*.hdf", start_date=None, end_date=None):
+        """
+        尋找所有符合條件的 HDF 文件，並根據日期範圍進行過濾
+
+        Parameters:
+            pattern (str): 文件匹配模式，默認為 "**/*.hdf"
+            start_date (str or datetime): 過濾的開始日期，格式為 'YYYY-MM-DD' 或 datetime 對象
+            end_date (str or datetime): 過濾的結束日期，格式為 'YYYY-MM-DD' 或 datetime 對象
+
+        Returns:
+            list: 符合條件的 HDF 文件列表
+        """
+        # 先查找符合模式的所有文件
+        all_files = [f for f in self.raw_dir.glob(pattern) if not f.name.startswith("._")]
+
+        # 如果沒有指定日期範圍，直接返回所有文件
+        if not start_date and not end_date:
+            return all_files
+
+        # 轉換日期字符串為 datetime 對象
+        if start_date and isinstance(start_date, str):
+            start_date = datetime.strptime(start_date, "%Y-%m-%d")
+        if end_date and isinstance(end_date, str):
+            end_date = datetime.strptime(end_date, "%Y-%m-%d")
+
+        # 根據日期範圍過濾文件
+        filtered_files = []
+        for hdf_file in all_files:
+            file_date, date_str = self.extract_date_from_filename(hdf_file)
+
+            # 如果無法從文件名提取日期，跳過此文件
+            if not file_date:
+                self.logger.debug(f"無法從文件名提取日期: {hdf_file}")
+                continue
+
+            # 檢查文件日期是否在指定範圍內
+            if start_date and file_date < start_date:
+                continue
+            if end_date and file_date > end_date:
+                continue
+
+            filtered_files.append(hdf_file)
+
+        date_range_str = ""
+        if start_date or end_date:
+            date_range_str = f"(從 {start_date.strftime('%Y-%m-%d') if start_date else '最早'} 到 {end_date.strftime('%Y-%m-%d') if end_date else '最新'})"
+
+        self.logger.info(f"找到 {len(filtered_files)} 個有效的 HDF 文件 {date_range_str}")
+        return filtered_files
+
     def process_all_files(self, pattern="**/*.hdf", start_date=None, end_date=None):
-        """處理所有 HDF 文件並創建組合地圖"""
-        # 尋找符合條件的文件
-        hdf_files = self.find_hdf_files(pattern)
+        """
+        處理日期範圍內的所有 HDF 文件並創建組合地圖
+
+        Parameters:
+            pattern (str): 文件匹配模式，默認為 "**/*.hdf"
+            start_date (str or datetime): 處理的開始日期，格式為 'YYYY-MM-DD' 或 datetime 對象
+            end_date (str or datetime): 處理的結束日期，格式為 'YYYY-MM-DD' 或 datetime 對象
+
+        Returns:
+            int: 成功處理的文件數量
+        """
+        # 尋找符合條件的文件（已根據日期範圍過濾）
+        hdf_files = self.find_hdf_files(pattern, start_date, end_date)
 
         if not hdf_files:
-            print("沒有找到符合條件的 HDF 文件")
-            return
+            self.logger.info("沒有找到符合條件的 HDF 文件")
+            return 0
 
         # 處理每個文件
         processed_count = 0
@@ -255,4 +308,5 @@ class MODISProcessor:
             if self.process_hdf_file(hdf_file):
                 processed_count += 1
 
-        print(f"\n處理完成! 成功處理 {processed_count} 個檔案。")
+        self.logger.info(f"處理完成! 成功處理 {processed_count} 個檔案。")
+        return processed_count
