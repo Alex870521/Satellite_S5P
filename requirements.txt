@@ -26,3 +26,4 @@ cdsapi~=0.7.5
 sentinelsat~=1.2.1
 earthaccess~=0.14.0
 pyhdf~=0.11.6
+pytz~=2024.2

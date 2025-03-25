@@ -5,13 +5,13 @@ from src.api import MODISHub
 
 def main():
     # 1. Set parameters
-    start_date, end_date = datetime(2025, 3, 1), datetime(2025, 3, 12)
+    start_date, end_date = datetime(2025, 3, 1), datetime.now()
 
     # Product type options:
     # - 'MOD04': Terra satellite MODIS aerosol product
     # - 'MYD04': Aqua satellite MODIS aerosol product
     # - 'MCD04': Combined Terra and Aqua MODIS aerosol product (Not implemented)
-    modis_product_type = "MYD04"
+    modis_product_type = "MOD04"
 
     # 2. Create data hub instance
     modis_hub = MODISHub()

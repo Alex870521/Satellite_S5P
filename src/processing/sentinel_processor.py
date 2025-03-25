@@ -1,17 +1,19 @@
 import numpy as np
 import xarray as xr
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
 from pathlib import Path
 
 from src.processing.interpolators import DataInterpolator
 from src.processing.grid_frame import GridFrame
 from src.config.settings import FIGURE_BOUNDARY
-from src.config.catalog import ClassInput, TypeInput, PRODUCT_CONFIGS
+from src.config.catalog import PRODUCT_CONFIGS
 from src.visualization.plot_nc import plot_global_var
+from src.visualization.gif import animate_data
+from src.utils.extract_datetime_from_filename import extract_datetime_from_filename
 
 
 class SentinelProcessor:
+    """處理 S5P 數據並生成可視化圖像"""
     def __init__(self, interpolation_method='kdtree', resolution=(5.5, 3.5), mask_qc_value=0.75):
         """初始化處理器
 
@@ -29,6 +31,8 @@ class SentinelProcessor:
         self.figure_dir = None
         self.geotiff_dir = None
         self.logger = None
+        self.file_type = None
+        self.file_class = None
 
         self.interpolation_method = interpolation_method
         self.resolution = resolution
@@ -44,7 +48,7 @@ class SentinelProcessor:
         """
         # 初始處理
         time = np.datetime64(dataset.time.values[0], 'D')
-        attributes = PRODUCT_CONFIGS[self.product_type].dataset_name
+        attributes = PRODUCT_CONFIGS[self.file_type].dataset_name
 
         # 如果提供了範圍，進行過濾
         if extract_range is not None:
@@ -82,16 +86,26 @@ class SentinelProcessor:
 
         return mask_dataset, lon, lat, var
 
-    def process_single_file(self, file_path: Path, output_dir: Path, geotiff_dir: Path):
-        """處理單一檔案"""
-        ds = xr.open_dataset(file_path, engine='netcdf4', group='PRODUCT')
+    def process_nc_file(self, nc_file: Path, output_dir: Path, geotiff_dir: Path):
+        """處理單個 nc 檔"""
+        # 從文件名提取日期
+        file_date = extract_datetime_from_filename(nc_file.name, to_local=False)
+        self.logger.info(f"處理文件: {nc_file.name} ({file_date.strftime('%Y-%m-%d')})")
+
+        # 打開 nc 文件
+        ds = xr.open_dataset(nc_file, engine='netcdf4', group='PRODUCT')
 
         try:
-            interpolated_ds = self._process_data(ds, file_path)
+            interpolated_ds = self._process_data(ds, nc_file)
             if interpolated_ds is not None:
-                self._save_outputs(interpolated_ds, file_path, output_dir, geotiff_dir)
+                self._save_outputs(interpolated_ds, nc_file, output_dir, geotiff_dir)
+                return True
+            else:
+                return False
+
         except Exception as e:
-            self.logger.error(f"Error processing file {file_path.name}: {str(e)}")
+            self.logger.error(f"Error processing file {nc_file.name}: {str(e)}")
+            return False
         finally:
             ds.close()
 
@@ -115,7 +129,7 @@ class SentinelProcessor:
             #         _dataset = mask_dataset.where((mask_dataset.qa_value >= q))
             #
             #     plot_global_var(dataset=_dataset,
-            #                     product_params=PRODUCT_CONFIGS[self.product_type],
+            #                     product_params=PRODUCT_CONFIGS[self.file_type],
             #                     map_scale='Taiwan')
 
             # 2.5 檢查竹苗中部空品區是否有數據，如果指定區域內沒有數據點，返回 None
@@ -136,10 +150,10 @@ class SentinelProcessor:
 
                     # 構建要清理的路徑
                     clean_paths = {
-                        'raw_data': self.raw_dir / self.product_type / year / month / f"{file_name}.nc",
-                        'output': self.processed_dir / self.product_type / year / month / f"{file_name}.nc",
-                        'figure': self.figure_dir / self.product_type / year / month / f"{file_path.stem}.png",
-                        'geotiff': self.geotiff_dir / self.product_type / year / month / f"{file_path.stem}.tiff"
+                        'raw_data': self.raw_dir / self.file_type / year / month / f"{file_name}.nc",
+                        'output': self.processed_dir / self.file_type / year / month / f"{file_name}.nc",
+                        'figure': self.figure_dir / self.file_type / year / month / f"{file_path.stem}.png",
+                        'geotiff': self.geotiff_dir / self.file_type / year / month / f"{file_path.stem}.tiff"
                     }
 
                     # 刪除對應的檔案
@@ -167,7 +181,7 @@ class SentinelProcessor:
             # 4. 創建數據集
             return xr.Dataset(
                 {
-                    PRODUCT_CONFIGS[self.product_type].dataset_name: (
+                    PRODUCT_CONFIGS[self.file_type].dataset_name: (
                         ['time', 'latitude', 'longitude'],
                         var_grid[np.newaxis, :, :]
                     )
@@ -205,11 +219,26 @@ class SentinelProcessor:
         except Exception as e:
             self.logger.error(f"Error saving outputs: {str(e)}")
 
-    def process_each_data(self, file_class: ClassInput, file_type: TypeInput,
-                          start_date: str, end_date: str):
-        """處理指定日期範圍內的衛星數據，限定於23.5N-25N, 120E-122E區域"""
-        self.product_type = file_type
-        self.file_pattern = f"*{file_class}_L2__{file_type}*.nc"
+    def process_all_files(self, pattern=None, start_date=None, end_date=None):
+        """
+        處理日期範圍內的所有衛星數據文件
+
+        Parameters:
+            pattern (str): 文件匹配模式，如果為 None 則根據文件類型自動選擇
+            start_date (str or datetime): 處理的開始日期，格式為 'YYYY-MM-DD' 或 datetime 對象
+            end_date (str or datetime): 處理的結束日期，格式為 'YYYY-MM-DD' 或 datetime 對象
+
+        Returns:
+            bool: 處理是否成功
+        """
+        # 設置默認值和進行類型轉換
+        if pattern is None:
+            if hasattr(self, 'file_class') and self.file_class:
+                pattern = f"**/{self.file_type}/**/*{self.file_class}*.nc"
+            else:
+                pattern = f"**/{self.file_type}/**/*.nc"
+
+        self.pattern = pattern
 
         # 處理日期格式：接受字符串或datetime對象
         if isinstance(start_date, str):
@@ -221,17 +250,61 @@ class SentinelProcessor:
             self.end = datetime.strptime(end_date, '%Y-%m-%d')
         else:
             self.end = end_date
-        current_date = self.start
 
-        while current_date <= self.end:
-            year, month = current_date.strftime('%Y'), current_date.strftime('%m')
+        # 找到所有符合條件的文件
+        self.logger.info(f"尋找所有符合條件的衛星數據文件，模式: {self.pattern}")
+        all_files = [f for f in self.raw_dir.glob(pattern) if not f.name.startswith("._") and f.is_file()]
+
+        # 根據日期範圍過濾文件
+        filtered_files = []
+        for file_path in all_files:
+            file_date = extract_datetime_from_filename(file_path.name, to_local=False)
+
+            # 如果無法從文件名提取日期，跳過此文件
+            if not file_date:
+                self.logger.debug(f"無法從文件名提取日期: {file_path}")
+                continue
+
+            # 檢查文件日期是否在指定範圍內
+            if self.start and file_date < self.start:
+                continue
+            if self.end and file_date > self.end:
+                continue
+
+            filtered_files.append(file_path)
+
+        date_range_str = ""
+        if self.start or self.end:
+            date_range_str = f"(從 {self.start.strftime('%Y-%m-%d') if self.start else '最早'} 到 {self.end.strftime('%Y-%m-%d') if self.end else '最新'})"
+
+        self.logger.info(f"找到 {len(filtered_files)} 個有效的衛星數據文件 {date_range_str}")
+
+        if not filtered_files:
+            self.logger.info("沒有找到符合條件的文件")
+            return False
+
+        # 按年月組織文件
+        files_by_month = {}
+        for file_path in filtered_files:
+            file_date = extract_datetime_from_filename(file_path.name, to_local=False)
+            year_month = file_date.strftime('%Y-%m')
+
+            if year_month not in files_by_month:
+                files_by_month[year_month] = []
+
+            files_by_month[year_month].append(file_path)
+
+        # 處理每個月的文件
+        processed_count = 0
+        for year_month, month_files in files_by_month.items():
+            year, month = year_month.split('-')
 
             # 設置目錄
             paths = {
-                'input': self.raw_dir / file_type / year / month,
-                'output': self.processed_dir / file_type / year / month,
-                'figure': self.figure_dir / file_type / year / month,
-                'geotiff': self.geotiff_dir / file_type / year / month
+                'input': self.raw_dir / self.file_type / year / month,
+                'output': self.processed_dir / self.file_type / year / month,
+                'figure': self.figure_dir / self.file_type / year / month,
+                'geotiff': self.geotiff_dir / self.file_type / year / month
             }
 
             # 創建目錄
@@ -239,54 +312,59 @@ class SentinelProcessor:
                 if dir_path != paths['input']:  # 不創建輸入目錄
                     dir_path.mkdir(parents=True, exist_ok=True)
 
-            # 處理檔案
-            if paths['input'].exists():
-                self._process_files(paths)
-                self._create_figures(paths)
+            # 處理該月的所有文件
+            month_processed = 0
+            self.logger.info(f"處理 {year}-{month} 的 {len(month_files)} 個文件")
 
-            current_date = (current_date + relativedelta(months=1)).replace(day=1)
+            for nc_file in month_files:
+                try:
+                    result = self.process_nc_file(nc_file, paths['output'], paths['geotiff'])
+                    if result:
+                        # 文件處理成功後立即創建圖像
+                        try:
+                            output_file = paths['output'] / nc_file.name
+                            figure_path = paths['figure'] / f"{nc_file.stem}.png"
 
-        return True
+                            self.logger.info(f"正在創建圖像: {figure_path}")
 
-    def _process_files(self, paths: dict):
-        """處理原始檔案"""
-        for file_path in paths['input'].glob(self.file_pattern):
-            if not file_path.is_file() or file_path.name.startswith('._'):
-                continue
+                            plot_global_var(
+                                dataset=output_file,
+                                product_params=PRODUCT_CONFIGS[self.file_type],
+                                savefig_path=figure_path,
+                                map_scale='Taiwan',
+                                mark_stations=None
+                            )
+                        except Exception as e:
+                            self.logger.error(f"繪製檔案 {nc_file.name} 時發生錯誤: {e}")
 
-            if not (self.start <= datetime.strptime(file_path.name[20:28], '%Y%m%d') <= self.end):
-                continue
+                        month_processed += 1
+                        processed_count += 1
+                except Exception as e:
+                    self.logger.error(f"處理檔案 {nc_file.name} 時發生錯誤: {e}")
 
-            try:
-                self.process_single_file(file_path, paths['output'], paths['geotiff'])
-            except Exception as e:
-                self.logger.error(f"處理檔案 {file_path.name} 時發生錯誤: {e}")
+            # 創建動畫
+            if month_processed > 0:
+                try:
+                    # 創建動畫
+                    animation_path = paths['figure'] / f"{self.file_type}_{self.file_class}_{year}{month}_animation.gif"
+                    animate_data(
+                        image_dir=paths['figure'],
+                        output_path=animation_path,
+                        date_type="s5p" if self.file_type == "S5P" else "auto",
+                        fps=1
+                    )
+                    self.logger.info(f"創建動畫: {animation_path}")
+                except Exception as e:
+                    self.logger.error(f"創建 {year}-{month} 的動畫時發生錯誤: {e}")
 
-    def _create_figures(self, paths: dict):
-        """創建圖表"""
-        for file_path in paths['output'].glob(self.file_pattern):
-            if not file_path.is_file() or file_path.name.startswith('._'):
-                continue
-
-            if not (self.start <= datetime.strptime(file_path.name[20:28], '%Y%m%d') <= self.end):
-                continue
-
-            try:
-                figure_path = paths['figure'] / f"{file_path.stem}.png"
-                plot_global_var(
-                    dataset=file_path,
-                    product_params=PRODUCT_CONFIGS[self.product_type],
-                    savefig_path=figure_path,
-                    map_scale='Taiwan',
-                )
-            except Exception as e:
-                self.logger.error(f"繪製檔案 {file_path.name} 時發生錯誤: {e}")
+        self.logger.info(f"處理完成! 成功處理 {processed_count} 個檔案，共 {len(files_by_month)} 個月。")
+        return processed_count > 0
 
     def save_as_tiff(self, ds: xr.Dataset, output_path: Path) -> None:
         """將 NetCDF 數據集中的 NO2 數值儲存為 GeoTIFF"""
         try:
             # 獲取變數名稱和數據
-            var_name = PRODUCT_CONFIGS[self.product_type].dataset_name
+            var_name = PRODUCT_CONFIGS[self.file_type].dataset_name
             da = ds[var_name].isel(time=0)
 
             # 設定地理資訊

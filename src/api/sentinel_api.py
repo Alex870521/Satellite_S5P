@@ -492,10 +492,12 @@ class SENTINEL5PHub(SatelliteHub):
             self._processor.figure_dir = self.figure_dir
             self._processor.geotiff_dir = self.geotiff_dir
             self._processor.logger = self.logger
+            self._processor.file_type = self.file_type
+            self._processor.file_class = self.file_class
 
         return self._processor
 
-    def process_data(self, file_class=None, file_type=None, start_date=None, end_date=None):
+    def process_data(self, pattern=None, start_date=None, end_date=None):
         """處理下載的Sentinel-5P數據並生成可視化圖像"""
         if not hasattr(self, 'file_class'):
             raise ValueError("未設置file_class，請先呼叫fetch_data方法")
@@ -504,11 +506,11 @@ class SENTINEL5PHub(SatelliteHub):
         if not hasattr(self, 'file_type'):
             raise ValueError("未設置file_type，請先呼叫fetch_data方法")
 
+        # 如果未指定模式，使用基於file_type的默認模式
+        if pattern is None:
+            pattern = f"**/{self.file_type}/**/*{self.file_class}*.nc"
+
         # 使用類屬性作為默認值
-        if file_class is None:
-            file_class = self.file_class
-        if file_type is None:
-            file_type = self.file_type
         if start_date is None:
             start_date = self.start_date
         if end_date is None:
@@ -523,7 +525,7 @@ class SENTINEL5PHub(SatelliteHub):
         self.logger.info(f"開始處理Sentinel-5P數據，{date_range_str}")
 
         # 使用處理器處理所有文件
-        return self.processor.process_each_data(file_class, file_type, start_date, end_date)
+        return self.processor.process_all_files(pattern, start_date, end_date)
 
 
 if __name__ == '__main__':

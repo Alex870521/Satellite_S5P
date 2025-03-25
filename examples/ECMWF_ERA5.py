@@ -6,7 +6,7 @@ from src.api import ERA5Hub
 
 def main():
     # 1. Set parameters
-    start_date, end_date = datetime(2025, 3, 1), datetime(2025, 3, 19)
+    start_date, end_date = datetime(2022, 1, 1), datetime(2024, 12, 31)
 
     # Variables to retrieve, options:
     # - 'boundary_layer_height'
@@ -41,6 +41,7 @@ def main():
         variables=variables,
         pressure_levels=pressure_levels,
         stations=STATIONS,
+        download_mode='all_at_once'
     )
 
     # 4. Download data

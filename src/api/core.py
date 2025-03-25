@@ -177,7 +177,7 @@ class SatelliteHub(ABC):
                     tz_info = timezone.utc
 
         # Step 4: Get current time for validation (with matching timezone setting)
-        now = datetime.now(tz_info if set_timezone else None)
+        now = datetime.now()
 
         # Step 5: Validate dates are not in the future
         if start_date > now:

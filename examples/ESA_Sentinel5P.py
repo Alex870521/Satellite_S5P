@@ -5,7 +5,7 @@ from src.api import SENTINEL5PHub
 
 def main():
     # 1. Set parameters
-    start_date, end_date = datetime(2025, 3, 1), datetime(2025, 3, 13)
+    start_date, end_date = datetime(2025, 3, 1), datetime.now()
 
     # File class options:
     # - 'NRTI': Near Real-Time data

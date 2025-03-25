@@ -169,13 +169,14 @@ class MODISHub(SatelliteHub):
                 raise ValueError("未設置file_type，請先呼叫fetch_data方法")
 
             # 創建處理器實例
-            self._processor = MODISProcessor(self.file_type)
+            self._processor = MODISProcessor()
 
             # 設置路徑
             self._processor.raw_dir = self.raw_dir
             self._processor.processed_dir = self.processed_dir
             self._processor.figure_dir = self.figure_dir
             self._processor.logger = self.logger
+            self._processor.file_type = self.file_type
 
         return self._processor
 
@@ -196,7 +197,6 @@ class MODISHub(SatelliteHub):
             end_date = self.end_date
 
         # 準備日期範圍字符串用於日誌
-        date_range_str = ""
         if start_date or end_date:
             date_range_str = f"日期範圍: {start_date if start_date else '最早'} 至 {end_date if end_date else '最新'}"
         else:

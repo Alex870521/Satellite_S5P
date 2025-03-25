@@ -1,5 +1,7 @@
 import os
 import re
+from typing import Literal
+
 import cdsapi
 import xarray as xr
 import pandas as pd
@@ -44,7 +46,8 @@ class ERA5Hub(SatelliteHub):
             )
         return cdsapi.Client(quiet=True)
 
-    def fetch_data(self, start_date, end_date, boundary, variables=None, pressure_levels=None, stations=None):
+    def fetch_data(self, start_date, end_date, boundary, variables=None, pressure_levels=None, stations=None,
+                   download_mode: Literal['all_at_once', 'monthly'] = "monthly"):
         """
         Query ERA5 data without downloading
 
@@ -55,6 +58,7 @@ class ERA5Hub(SatelliteHub):
             variables (list): List of variables to fetch, defaults to boundary layer height
             pressure_levels (list or None): List of pressure levels (unit: hPa)
             stations (list or None): List of stations
+            download_mode (str): Download mode, either "monthly" or "all_at_once"
 
         Returns:
             bool: Whether the query was successful
@@ -68,12 +72,14 @@ class ERA5Hub(SatelliteHub):
         self.variables = variables if variables is not None else ['boundary_layer_height']
         self.pressure_levels = pressure_levels
         self.stations = stations
+        self.download_mode = download_mode
 
         # Display request information
         self.logger.info("ERA5 data query")
         self.logger.info(
             f"User time range: {self.start_date.strftime('%Y-%m-%d %H:%M:%S %z')} to {self.end_date.strftime('%Y-%m-%d %H:%M:%S %z')}")
         self.logger.info(f"Variables: {', '.join(self.variables)}")
+        self.logger.info(f"Download mode: {download_mode}")
 
         # Ensure all specific directories exist
         self.single_level_dir = self.raw_dir / "single_level"
@@ -101,6 +107,19 @@ class ERA5Hub(SatelliteHub):
         # Prepare query results
         self.query_results = []
 
+        if download_mode == "all_at_once":
+            # Download all data at once
+            self._prepare_all_at_once_query()
+        else:
+            # Default to monthly download
+            self._prepare_monthly_queries()
+
+        self.logger.info(
+            f"ERA5 data query completed, need to download {len(self.query_results)} {'months' if download_mode == 'monthly' else 'files'} of data")
+        return True
+
+    def _prepare_monthly_queries(self):
+        """Prepare monthly queries for ERA5 data"""
         # Get complete month list
         current_date = self.start_date.replace(
             day=1)  # Start from the beginning of the month for easier monthly iteration
@@ -150,7 +169,7 @@ class ERA5Hub(SatelliteHub):
 
             # Generate filename
             if self.is_pressure_level_data:
-                filename = f"era5_pl_{self.var_str}_{'-'.join(map(str, pressure_levels))}_{file_date_range}.nc"
+                filename = f"era5_pl_{self.var_str}_{'-'.join(map(str, self.pressure_levels))}_{file_date_range}.nc"
                 dataset = "reanalysis-era5-pressure-levels"
             else:
                 filename = f"era5_sfc_{self.var_str}_{file_date_range}.nc"
@@ -168,11 +187,11 @@ class ERA5Hub(SatelliteHub):
                 'variable': self.variables,
                 'date': query_date_str,
                 'time': [f"{h:02d}:00" for h in range(24)],  # Add hour parameters
-                'area': self.boundary, # [north, west, south, east]
+                'area': self.boundary,  # [north, west, south, east]
             }
 
             if self.is_pressure_level_data:
-                request_params['pressure_level'] = pressure_levels
+                request_params['pressure_level'] = self.pressure_levels
 
             # Add to query results list
             self.query_results.append({
@@ -186,8 +205,59 @@ class ERA5Hub(SatelliteHub):
             # Move to next month
             current_date = next_month
 
-        self.logger.info(f"ERA5 data query completed, need to download {len(self.query_results)} months of data")
-        return True
+    def _prepare_all_at_once_query(self):
+        """Prepare a single query for all data at once"""
+        # For all_at_once mode, we store directly in the base directory without year subfolders
+        base_dir = self.pressure_level_dir if self.is_pressure_level_data else self.single_level_dir
+        target_dir = base_dir  # Store directly in the base directory
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Adjust query dates considering timezone
+        query_start_date = self.start_date
+        query_end_date = self.end_date
+
+        if self.tz_offset > 0:  # UTC+ timezone, adjust start date one day earlier
+            query_start_date = query_start_date - timedelta(days=1)
+        if self.tz_offset < 0:  # UTC- timezone, adjust end date one day later
+            query_end_date = query_end_date + timedelta(days=1)
+
+        # Create date range string for filename (YYYYMMDD_YYYYMMDD)
+        file_date_range = f"{query_start_date.strftime('%Y%m%d')}_{query_end_date.strftime('%Y%m%d')}"
+
+        # Generate filename
+        if self.is_pressure_level_data:
+            filename = f"era5_pl_{self.var_str}_{'-'.join(map(str, self.pressure_levels))}_{file_date_range}.nc"
+            dataset = "reanalysis-era5-pressure-levels"
+        else:
+            filename = f"era5_sfc_{self.var_str}_{file_date_range}.nc"
+            dataset = "reanalysis-era5-single-levels"
+
+        target_file = target_dir / filename
+
+        # Create date string for query (YYYY-MM-DD/YYYY-MM-DD)
+        query_date_str = f"{query_start_date.strftime('%Y-%m-%d')}/{query_end_date.strftime('%Y-%m-%d')}"
+
+        # Prepare request parameters
+        request_params = {
+            'product_type': 'reanalysis',
+            'format': 'netcdf',
+            'variable': self.variables,
+            'date': query_date_str,
+            'time': [f"{h:02d}:00" for h in range(24)],  # Add hour parameters
+            'area': self.boundary,  # [north, west, south, east]
+        }
+
+        if self.is_pressure_level_data:
+            request_params['pressure_level'] = self.pressure_levels
+
+        # Add to query results list
+        self.query_results.append({
+            'target_file': str(target_file),
+            'filename': filename,
+            'dataset': dataset,
+            'request_params': request_params,
+            'exists': target_file.exists()
+        })
 
     def download_data(self):
         """

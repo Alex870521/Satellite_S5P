@@ -14,6 +14,7 @@ from matplotlib.ticker import ScalarFormatter, FixedLocator
 from src.config.settings import FIGURE_BOUNDARY
 from src.config.richer import DisplayManager
 from src.config.catalog import PRODUCT_CONFIGS
+from src.utils.extract_datetime_from_filename import extract_datetime_from_filename
 
 
 plt.rcParams['mathtext.fontset'] = 'custom'
@@ -91,13 +92,80 @@ def plot_stations(ax, stations: list[str], label_offset: tuple[float, float] = (
               borderaxespad=0.)
 
 
+def basic_map(ax, map_scale='Taiwan', mark_stations=None):
+    """
+    創建基本地圖，包含邊界、縣市、網格線等基礎元素
+
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        繪圖軸對象
+    map_scale : str
+        地圖比例尺，可選 'global', 'East_Asia', 'Taiwan'
+    mark_stations : list or None
+        需要標記的測站列表
+
+    Returns:
+    --------
+    ax : matplotlib.axes.Axes
+        添加了基本元素的繪圖軸對象
+    """
+    # 設定地圖範圍
+    if map_scale == 'global':
+        ax.set_global()
+    elif map_scale == 'East_Asia':
+        ax.set_extent([110, 130, 15, 35], crs=ccrs.PlateCarree())
+    elif map_scale == 'Taiwan':
+        ax.set_extent([119, 123, 21, 26], crs=ccrs.PlateCarree())
+    else:
+        raise ValueError("map_scale must be 'Taiwan' or 'East_Asia' or 'global'")
+
+    # 根據地圖比例尺添加不同的元素
+    if map_scale == 'Taiwan':
+        try:
+            # 讀取台灣縣市邊界
+            Taiwan_gdf = gpd.read_file(Path(__file__).parents[2] / "data/shapefiles/Taiwan/COUNTY_MOI_1090820.shp")
+            ax.add_geometries(Taiwan_gdf['geometry'], crs=ccrs.PlateCarree(), edgecolor='black', facecolor='none',
+                              zorder=10)
+
+            # 讀取中國邊界
+            China_gdf = gpd.read_file(Path(__file__).parents[2] / "data/shapefiles/China/gadm36_CHN_0.shp")
+            ax.add_geometries(China_gdf['geometry'], crs=ccrs.PlateCarree(), edgecolor='black', facecolor='none',
+                              zorder=10)
+
+        except Exception as e:
+            print(f"讀取或處理縣市邊界時發生錯誤: {e}")
+
+        # 設定網格線
+        gl = ax.gridlines(draw_labels=True, linestyle='--', alpha=0.7)
+        gl.top_labels = False
+        gl.right_labels = False
+        gl.xlocator = FixedLocator([119, 120, 121, 122, 123])  # 設定經度刻度
+
+        # 標記測站
+        if mark_stations:
+            plot_stations(ax, mark_stations)
+
+    else:
+        # 添加地圖特徵
+        ax.add_feature(cfeature.BORDERS.with_scale('10m'), zorder=10)
+        ax.add_feature(cfeature.COASTLINE.with_scale('10m'), zorder=10)
+        # ax.add_feature(cfeature.LAND.with_scale('10m'))
+        # ax.add_feature(cfeature.OCEAN.with_scale('10m'))
+
+        gl = ax.gridlines(draw_labels=True, linestyle='--', alpha=0.7)
+        gl.top_labels = False
+        gl.right_labels = False
+
+    return ax
+
+
 def plot_global_var(dataset: xr.Dataset | Path | str,
                     product_params,
                     show_info: bool = True,
                     savefig_path=None,
-                    map_scale: Literal['global', 'Taiwan'] = 'global',
-                    show_stations: bool = False,
-                    mark_stations: list = ['古亭', '楠梓', '鳳山'],
+                    map_scale: Literal['global', 'East_Asia', 'Taiwan'] = 'global',
+                    mark_stations: list | None = ['古亭', '忠明', '楠梓', '鳳山'],
                     mark_rectangle: bool = False,
                     ):
     """
@@ -141,18 +209,20 @@ def plot_global_var(dataset: xr.Dataset | Path | str,
             DisplayManager().display_product_info(nc_info)
 
         # 創建圖形和投影
-        fig = plt.figure(figsize=(12, 8) if map_scale == 'global' else (8, 8))
+        fig = plt.figure(figsize=(12, 8) if map_scale == 'global' else (8, 8), dpi=300)
         ax = plt.axes(projection=ccrs.PlateCarree())
 
-        # 設定全球範圍
-        if map_scale == 'global':
-            ax.set_global()
-        else:
-            ax.set_extent(FIGURE_BOUNDARY, crs=ccrs.PlateCarree())
+        # 使用basic_map函數創建基本地圖
+        ax = basic_map(ax, map_scale=map_scale, mark_stations=mark_stations)
 
         # 繪製數據
         dataset = ds[product_params.dataset_name][0]
-        dataset.data = smooth_kernel(dataset.data, kernel_size=3)
+
+        # 嘗試應用平滑，如果失敗則使用原始數據
+        try:
+            dataset.data = smooth_kernel(dataset.data, kernel_size=3)
+        except Exception as e:
+            logger.warning(f"平滑處理失敗: {str(e)}，使用原始數據")
 
         # 方法1：使用 ScalarFormatter
         formatter = ScalarFormatter(useMathText=True)
@@ -167,6 +237,7 @@ def plot_global_var(dataset: xr.Dataset | Path | str,
             robust=True,  # 自動處理極端值
             vmin=product_params.vmin,
             vmax=product_params.vmax,
+            zorder=1,  # 添加 zorder 參數，設定圖層順序
             cbar_kwargs={
                 'label': product_params.units,
                 'fraction': 0.04,  # colorbar 的寬度 (預設是 0.15)
@@ -177,32 +248,6 @@ def plot_global_var(dataset: xr.Dataset | Path | str,
                 'extend': 'neither',
             }
         )
-
-        # plot = dataset.plot.pcolormesh(ax=ax, x='longitude', y='latitude', add_colorbar=False, cmap='jet')
-
-        # 如果是台灣範圍且需要顯示測站
-        if map_scale == 'Taiwan':
-            # ax.add_feature(cfeature.COASTLINE.with_scale('10m'))
-
-            # 讀取縣市和測站資料並添加縣市邊界
-            taiwan_counties = gpd.read_file(Path(__file__).parents[2] / "data/shapefiles/taiwan/COUNTY_MOI_1090820.shp")
-            ax.add_geometries(taiwan_counties['geometry'], crs=ccrs.PlateCarree(), edgecolor='black', facecolor='none')
-
-        if show_stations and mark_stations:
-            plot_stations(ax, mark_stations)
-
-        else:
-            # 添加地圖特徵
-            ax.add_feature(cfeature.BORDERS.with_scale('10m'), linestyle=':')
-            # ax.add_feature(cfeature.COASTLINE.with_scale('10m'))
-            # ax.add_feature(cfeature.LAND.with_scale('10m'), alpha=0.1)
-            # ax.add_feature(cfeature.OCEAN.with_scale('10m'), alpha=0.1)
-
-        # 設定網格線
-        gl = ax.gridlines(draw_labels=True, linestyle='--', alpha=0.7)
-        gl.top_labels = False
-        gl.right_labels = False
-        gl.xlocator = FixedLocator([119, 120, 121, 122, 123])  # 設定經度刻度
 
         # 用矩形標記數據範圍
         if mark_rectangle:
@@ -220,8 +265,8 @@ def plot_global_var(dataset: xr.Dataset | Path | str,
             ax.add_patch(rect)
 
         # 設定標題
-        time_str = np.datetime64(dataset.time.values, 'D').astype(str)
-        plt.title(f'{product_params.title} {time_str}', pad=20, fontdict={'weight': 'bold', 'fontsize': 24})
+        datetime_str = extract_datetime_from_filename(savefig_path.name)
+        plt.title(f'{datetime_str}', pad=20, fontdict={'weight': 'bold', 'fontsize': 24})
 
         plt.tight_layout()
         plt.show()
