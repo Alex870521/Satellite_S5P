@@ -24,19 +24,37 @@ def extract_datetime_from_filename(filename, to_local=True, local_tz='Asia/Taipe
         date_str = s5p_match.group(1)
         date_obj = datetime.strptime(date_str, '%Y%m%dT%H%M%S')
 
-    # MODIS 格式
+
+    # MODIS 格式解析
     elif not date_obj:
-        modis_match = re.search(r'(?:MOD|MYD|MCD)\d+_\w+\.A(\d{7})\.(\d{4})\.', filename)
-        if modis_match:
-            date_str = modis_match.group(1)
-            time_str = modis_match.group(2) if len(modis_match.groups()) > 1 else "0000"
+        # 匹配兩種主要的 MODIS 格式
+        # 格式1: MOD04_L2.A2025001.0210.061.2025001180158.hdf (包含時間)
+        # 格式2: MCD19A2.A2025001.h29v06.061.2025003055754.hdf (不包含時間)
+
+        # 先嘗試格式1 - 有時間信息的格式
+        modis_with_time = re.search(r'(?:MOD|MYD|MCD)\w*\.A(\d{7})\.(\d{4})\.', filename)
+        if modis_with_time:
+            date_str = modis_with_time.group(1)
+            time_str = modis_with_time.group(2)
 
             year = int(date_str[:4])
             day_of_year = int(date_str[4:])
             hour = int(time_str[:2])
             minute = int(time_str[2:]) if len(time_str) >= 4 else 0
 
-            date_obj = datetime(year, 1, 1) + timedelta(days=day_of_year -1, hours=hour, minutes=minute)
+            date_obj = datetime(year, 1, 1) + timedelta(days=day_of_year - 1, hours=hour, minutes=minute)
+
+        # 如果格式1沒匹配到，嘗試格式2 - 沒有時間信息的格式
+        else:
+            modis_without_time = re.search(r'(?:MOD|MYD|MCD)\w*\.A(\d{7})\.', filename)
+            if modis_without_time:
+                date_str = modis_without_time.group(1)
+
+                year = int(date_str[:4])
+                day_of_year = int(date_str[4:])
+
+                # 沒有時間信息時，設為當天午夜
+                date_obj = datetime(year, 1, 1) + timedelta(days=day_of_year - 1)
 
     # YYYYMMDD 格式
     elif not date_obj:

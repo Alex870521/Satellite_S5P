@@ -6,6 +6,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from pyhdf.SD import SD, SDC
 
+from src.config.catalog import PRODUCT_CONFIGS
 from src.config.settings import FIGURE_BOUNDARY, FILTER_BOUNDARY
 from src.visualization.plot_nc import plot_global_var, basic_map
 from src.visualization.gif import animate_data
@@ -39,9 +40,101 @@ class MODISProcessor:
             # 檢查可用的數據集
             datasets = hdf.datasets()
 
+            # 判斷文件類型並選擇對應的處理方法
+            if self._is_mcd19a2_file(hdf_file.name):
+                return self._process_mcd19a2(hdf, hdf_file, file_date, datasets)
+            else:
+                return self._process_mod04_myd04(hdf, hdf_file, file_date, datasets)
+
+        except Exception as e:
+            self.logger.info(f"  處理文件時發生錯誤: {e}")
+            return False
+
+    def _is_mcd19a2_file(self, filename):
+        """判斷是否為 MCD19A2 文件"""
+        return 'MCD19A2' in filename
+
+    def _process_mcd19a2(self, hdf, hdf_file, file_date, datasets):
+        """處理 MCD19A2 文件"""
+        try:
+            self.logger.info("  處理 MCD19A2 (Level 3) 產品")
+
+            # MCD19A2 的 AOD 數據集名稱
+            aod_name = 'Optical_Depth_047'  # 或 'Optical_Depth_055' 根據需要
+
+            if aod_name not in datasets:
+                self.logger.info(f"  數據集 {aod_name} 未找到，嘗試 'Optical_Depth_055'")
+                aod_name = 'Optical_Depth_055'
+
+                if aod_name not in datasets:
+                    self.logger.info(f"  找不到合適的 AOD 數據集，跳過此文件")
+                    return False
+
+            # 獲取 AOD 數據
+            aod_sds = hdf.select(aod_name)
+            aod_data = aod_sds.get()
+            aod_attrs = aod_sds.attributes()
+
+            self.logger.info(f"  AOD 數據形狀: {aod_data.shape}")
+
+            # MCD19A2 是3D數據 (時間, Y, X)，通常取第一個時間層
+            if len(aod_data.shape) == 3:
+                # 取第一個時間層或平均值
+                aod_data = aod_data[0, :, :]  # 或使用 np.nanmean(aod_data, axis=0)
+                self.logger.info(f"  取第一個時間層，調整後形狀: {aod_data.shape}")
+
+            # 生成地理座標 (MCD19A2 使用 sinusoidal 投影)
+            latitude, longitude = self._generate_mcd19a2_coordinates(aod_data.shape, hdf_file.name)
+
+            # 從屬性獲取比例因子
+            scale_factor = aod_attrs.get('scale_factor', 0.0001)  # MCD19A2 通常用 0.0001
+            _FillValue = aod_attrs.get('_FillValue', -28672)
+
+            self.logger.info(f"  比例因子: {scale_factor}, 填充值: {_FillValue}")
+
+            # 應用比例因子並處理缺失值
+            aod_data = aod_data.astype(float)
+            aod_data[aod_data == _FillValue] = np.nan
+            aod_data[aod_data < 0] = np.nan
+
+            # 應用比例因子到有效數據
+            valid_mask = ~np.isnan(aod_data)
+            if np.any(valid_mask):
+                aod_data[valid_mask] = aod_data[valid_mask] * scale_factor
+
+            # 使用 FILTER_BOUNDARY 按區域過濾
+            taiwan_mask = ((longitude >= self.filter_boundary[0]) & (longitude <= self.filter_boundary[1]) &
+                           (latitude >= self.filter_boundary[2]) & (latitude <= self.filter_boundary[3]))
+
+            # 檢查過濾區域中是否有數據
+            if np.sum(taiwan_mask & valid_mask) == 0:
+                self.logger.debug(f"  該文件在過濾區域中沒有有效的 AOD 數據。")
+                return False
+
+            self.logger.debug(f"  在過濾區域中找到有效數據。")
+
+            # 生成圖像
+            if file_date:
+                savefig_path = self.figure_dir / 'MCD19A2' / file_date.strftime("%Y/%m") / f"{hdf_file.stem}.png"
+
+                self._create_figures(aod_data, latitude, longitude,
+                                     title=f'MODIS Combined AOD {file_date.strftime("%Y-%m-%d")}',
+                                     savefig_path=savefig_path,
+                                     map_scale='Taiwan',
+                                     mark_stations=None)
+
+            hdf.end()
+            return True
+
+        except Exception as e:
+            self.logger.error(f"  處理 MCD19A2 文件時發生錯誤: {e}")
+            return False
+
+    def _process_mod04_myd04(self, hdf, hdf_file, file_date, datasets):
+        """處理 MOD04_L2/MYD04_L2 文件（原有的處理邏輯）"""
+        try:
             # 嘗試獲取 AOD 數據集
             aod_name = 'Image_Optical_Depth_Land_And_Ocean'
-            # aod_name = 'AOD_550_Dark_Target_Deep_Blue_Combined'
 
             if aod_name not in datasets:
                 self.logger.info(f"  數據集 {aod_name} 未找到，嘗試 'Optical_Depth_Land_And_Ocean'")
@@ -81,12 +174,11 @@ class MODISProcessor:
             # 從屬性獲取比例因子
             scale_factor = aod_attrs.get('scale_factor', 0.001)
             _FillValue = aod_attrs.get('_FillValue', -9999)
-            # self.logger.info(f"  比例因子: {scale_factor.__round__(5)}, 填充值: {_FillValue}")
 
             # 應用比例因子並處理缺失值
             aod_data = aod_data.astype(float)
-            aod_data[aod_data == _FillValue] = np.nan  # 將填充值設置為 NaN
-            aod_data[aod_data < 0] = np.nan  # 將負值設置為 NaN
+            aod_data[aod_data == _FillValue] = np.nan
+            aod_data[aod_data < 0] = np.nan
 
             # 應用比例因子到有效數據
             valid_mask = ~np.isnan(aod_data)
@@ -99,35 +191,99 @@ class MODISProcessor:
 
             # 檢查過濾區域中是否有數據
             if np.sum(taiwan_mask & valid_mask) == 0:
-                self.logger.debug(f"  該文件在過濾區域中沒有有效的 AOD 數據。")
+                self.logger.info(f"  該文件在過濾區域中沒有有效的 AOD 數據。")
                 return False
 
             self.logger.debug(f"  在過濾區域中找到有效數據。")
 
             # 生成單獨的圖像
             if file_date:
-                # 創建與原始數據相同的目錄結構
-                year_month_dir = file_date.strftime("%Y/%m")
-
-                # 使用 MODIS AOD 作為圖像的基本名稱
-                satellite_name = "Terra" if self.file_type == "MOD04" else "Aqua" if self.file_type == "MYD04" else "Terra + Aqua"
-
+                satellite_name = "Terra" if self.file_type == "MOD04_L2" else "Aqua"
                 savefig_path = self.figure_dir / self.file_type / file_date.strftime("%Y/%m") / f"{hdf_file.stem}.png"
 
-                # 使用原來的繪圖方法
                 self._create_figures(aod_data, latitude, longitude,
                                      title=f'{satellite_name} AOD {file_date.strftime("%Y-%m-%d")}',
                                      savefig_path=savefig_path,
                                      map_scale='Taiwan',
                                      mark_stations=None)
 
-            # 關閉 HDF 文件
             hdf.end()
             return True
 
         except Exception as e:
-            self.logger.info(f"  處理文件時發生錯誤: {e}")
+            self.logger.error(f"  處理 MOD04/MYD04 文件時發生錯誤: {e}")
             return False
+
+    def _generate_mcd19a2_coordinates(self, data_shape, filename):
+        """為 MCD19A2 數據生成地理座標"""
+        try:
+            # 從檔名提取 tile 信息 (例如 h29v06)
+            import re
+            tile_match = re.search(r'\.h(\d{2})v(\d{2})\.', filename)
+            if not tile_match:
+                raise ValueError("無法從檔名提取 tile 信息")
+
+            h_tile = int(tile_match.group(1))
+            v_tile = int(tile_match.group(2))
+
+            # MODIS sinusoidal 投影的正確參數
+            # 地球半徑 (meters)
+            R = 6371007.181
+            # 每個像素的大小 (meters) - 1km產品
+            pixel_size = 926.625433056
+            # 每個 tile 的像素數
+            tile_size = 1200
+
+            rows, cols = data_shape
+
+            # MODIS tile 系統的起始座標 (sinusoidal projection)
+            # 水平方向：從 -20015109.354 到 20015109.354 (共36個 tiles)
+            # 垂直方向：從 -10007554.677 到 10007554.677 (共18個 tiles)
+
+            # 計算 tile 的 sinusoidal 座標範圍
+            h_min = -20015109.354 + h_tile * tile_size * pixel_size
+            h_max = h_min + tile_size * pixel_size
+            v_max = 10007554.677 - v_tile * tile_size * pixel_size
+            v_min = v_max - tile_size * pixel_size
+
+            # 生成 sinusoidal 座標網格
+            x_coords = np.linspace(h_min, h_max, cols)
+            y_coords = np.linspace(v_max, v_min, rows)
+            X, Y = np.meshgrid(x_coords, y_coords)
+
+            # 轉換為經緯度
+            # Sinusoidal 投影的逆轉換
+            longitude = X / (R * np.cos(Y / R)) * 180 / np.pi
+            latitude = Y / R * 180 / np.pi
+
+            # 處理極地區域的特殊情況
+            latitude = np.clip(latitude, -90, 90)
+            longitude = np.clip(longitude, -180, 180)
+
+            # 檢查台灣區域的座標範圍
+            taiwan_mask = ((longitude >= 119.0) & (longitude <= 123.0) &
+                           (latitude >= 21.0) & (latitude <= 26.0))
+
+            if np.any(taiwan_mask):
+                lon_range = longitude[taiwan_mask]
+                lat_range = latitude[taiwan_mask]
+                self.logger.info(f"  台灣區域座標範圍: 經度 {lon_range.min():.2f} 到 {lon_range.max():.2f}, "
+                                 f"緯度 {lat_range.min():.2f} 到 {lat_range.max():.2f}")
+            else:
+                self.logger.warning("  此 tile 不包含台灣區域")
+
+            self.logger.info(f"  Tile h{h_tile:02d}v{v_tile:02d} 整體座標範圍: "
+                             f"經度 {longitude.min():.2f} 到 {longitude.max():.2f}, "
+                             f"緯度 {latitude.min():.2f} 到 {latitude.max():.2f}")
+
+            return latitude, longitude
+
+        except Exception as e:
+            self.logger.error(f"  生成 MCD19A2 座標時發生錯誤: {e}")
+            # 如果無法生成座標，返回簡單的索引網格
+            rows, cols = data_shape
+            y_indices, x_indices = np.mgrid[0:rows, 0:cols]
+            return y_indices.astype(float), x_indices.astype(float)
 
     def _create_figures(self, aod_data, latitude, longitude, title,
                         savefig_path=None,
@@ -251,7 +407,7 @@ class MODISProcessor:
             # 設置目錄
             paths = {
                 'input': self.raw_dir / self.file_type / year / month,
-                'output': self.processed_dir / self.file_type / year / month,
+                # 'output': self.processed_dir / self.file_type / year / month,
                 'figure': self.figure_dir / self.file_type / year / month,
             }
 
@@ -268,6 +424,7 @@ class MODISProcessor:
                 try:
                     result = self.process_hdf_file(hdf_file)
                     if result:
+                        # TODO: 整合 _create_figures and plot_global_var
                         # 文件處理成功後立即創建圖像
                         # try:
                         #     output_file = paths['output'] / hdf_file.name
@@ -290,7 +447,6 @@ class MODISProcessor:
                 except Exception as e:
                     self.logger.error(f"處理檔案 {hdf_file.name} 時發生錯誤: {e}")
 
-                # 創建動畫
             if month_processed > 0:
                 try:
                     # 創建動畫
@@ -302,10 +458,10 @@ class MODISProcessor:
                         image_dir=paths['figure'],
                         output_path=animation_path,
                         date_type="modis",
-                        fps=1
+                        fps=2
                     )
                 except Exception as e:
                     self.logger.error(f"創建 {year}-{month} 的動畫時發生錯誤: {e}")
 
-            self.logger.info(f"處理完成! 成功處理 {processed_count} 個檔案，共 {len(files_by_month)} 個月。")
-            return processed_count > 0
+        self.logger.info(f"處理完成! 成功處理 {processed_count} 個檔案，共 {len(files_by_month)} 個月。")
+        return processed_count > 0

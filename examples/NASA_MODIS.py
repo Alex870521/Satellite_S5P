@@ -5,13 +5,17 @@ from src.api import MODISHub
 
 def main():
     # 1. Set parameters
-    start_date, end_date = datetime(2025, 3, 1), datetime.now()
+    start_date, end_date = datetime(2025, 6, 1), datetime.now()
 
     # Product type options:
-    # - 'MOD04': Terra satellite MODIS aerosol product
-    # - 'MYD04': Aqua satellite MODIS aerosol product
-    # - 'MCD04': Combined Terra and Aqua MODIS aerosol product (Not implemented)
-    modis_product_type = "MOD04"
+    # - 'MOD04_L2': Terra satellite MODIS aerosol product
+    # - 'MYD04_L2': Aqua satellite MODIS aerosol product
+    # - 'MOD04_3K': Aqua satellite MODIS high-resolution aerosol product
+    # - 'MYD04_3K': Aqua satellite MODIS high-resolution aerosol product
+    # - 'MCD19A1': Combined Terra and Aqua MODIS surface spectral reflectance product
+    # - 'MCD19A2': Combined Terra and Aqua MODIS aerosol product
+    # - 'MCD19A3D': Combined Terra and Aqua MODIS BRDF and VI
+    modis_product_type = "MCD19A2"
 
     # 2. Create data hub instance
     modis_hub = MODISHub()

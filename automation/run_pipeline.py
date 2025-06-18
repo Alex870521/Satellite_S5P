@@ -78,7 +78,7 @@ async def daily_task():
             logger.info(f"今日({today})無可用的衛星數據")
 
     # 開始執行 MODIS
-    file_type: list[str] = ['MYD04', 'MOD04']
+    file_type: list[str] = ['MYD04_L2', 'MOD04_L2', 'MCD19A2']
 
     for file_tp in file_type:
 

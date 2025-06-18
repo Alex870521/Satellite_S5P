@@ -29,12 +29,12 @@ class MODISHub(SatelliteHub):
         return earthaccess.login()
 
     def fetch_data(self,
-                   file_type: str | Literal['MOD04', 'MYD04', 'MCD04'],
+                   file_type: str | Literal['MOD04_L2', 'MYD04_L2', 'MOD04_3K', 'MYD04_3K', 'MCD19A1', 'MCD19A2', 'MCD19A3D'],
                    start_date: str | datetime,
                    end_date: str | datetime,
                    boundary: tuple = SEARCH_BOUNDARY
                    ) -> list:
-
+        """ """
         self.file_type = file_type
         self.start_date, self.end_date = self._normalize_time_inputs(start_date, end_date, set_timezone=False)
 
@@ -43,7 +43,7 @@ class MODISHub(SatelliteHub):
         end_date_iso = self.end_date.strftime("%Y-%m-%dT%H:%M:%S.999Z")
 
         products = earthaccess.search_data(
-            short_name=f"{file_type}_L2",
+            short_name=file_type,
             temporal=(start_date_iso, end_date_iso),
             bounding_box=boundary,
         )

@@ -134,8 +134,8 @@ from src.api import MODISHub
 # 1. Set parameters
 start_date, end_date = datetime(2025, 3, 1), datetime(2025, 3, 12)
 
-# Product types: 'MOD04' (Terra) or 'MYD04' (Aqua)
-modis_product_type = "MYD04"
+# Product types: 'MOD04_L2' (Terra) or 'MYD04_L2' (Aqua) Level-2 Products
+modis_product_type = "MYD04_L2"
 
 # 2. Create data hub instance
 modis_hub = MODISHub()

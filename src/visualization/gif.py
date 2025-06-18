@@ -12,7 +12,7 @@ from src.utils.extract_datetime_from_filename import extract_datetime_from_filen
 logger = logging.getLogger(__name__)
 
 
-def animate_data(image_dir, output_path, date_type="auto", fps=1, resize=None, to_local=True, local_tz='Asia/Taipei',
+def animate_data(image_dir, output_path, date_type="auto", fps=2, resize=None, to_local=True, local_tz='Asia/Taipei',
                  **kwargs):
     """
     將圖片製作成 GIF 動畫，智能識別日期格式並排序
@@ -52,7 +52,7 @@ def animate_data(image_dir, output_path, date_type="auto", fps=1, resize=None, t
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 取得所有 PNG 圖片檔案
-    image_files = list(image_dir.glob('**/*.png'))
+    image_files = [f for f in image_dir.glob('**/*.png') if not f.name.startswith('._')]
 
     if not image_files:
         logger.warning("沒有找到 PNG 圖片！")
