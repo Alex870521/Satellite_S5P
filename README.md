@@ -3,16 +3,11 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-blue.svg)
-![GitHub last commit](https://img.shields.io/github/last-commit/Alex870521/aeroviz?logo=github)
+[![Tests](https://github.com/Alex870521/Satellite_S5P/actions/workflows/pytest.yml/badge.svg)](https://github.com/Alex870521/Satellite_S5P/actions/workflows/pytest.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![GitHub last commit](https://img.shields.io/github/last-commit/Alex870521/Satellite_S5P?logo=github)
 
 </div>
-
-<div align="center">
-<a href="https://github.com/Alex870521"><img src="https://cdn.simpleicons.org/github/0A66C2" width="3%" alt="LinkedIn"></a>
-<span style="margin: 0 1%"></span>
-<a href="https://www.linkedin.com/in/Alex870521/"><img src="https://cdn.simpleicons.org/linkedin/0A66C2" width="3%" alt="LinkedIn"></a>
-<span style="margin: 0 1%"></span>
-<a href="https://medium.com/@alex870521"><img src="https://cdn.simpleicons.org/medium/0A66C2" width="3%" alt="Medium"></a></div>
 
 ---
 
@@ -69,7 +64,24 @@ Before using this toolkit, you need to complete the following steps:
      # NASA Earthdata credentials
      EARTHDATA_USERNAME=your_username
      EARTHDATA_PASSWORD=your_password
+
+     # Where downloads/outputs are stored. REQUIRED unless the default
+     # external drive (/Volumes/Transcend) is mounted — otherwise creating a
+     # hub (e.g. SENTINEL5PHub()) fails immediately while making its data dirs.
+     SATELLITE_BASE_DIR=/path/to/your/data
      ```
+
+> [!IMPORTANT]
+> **`SATELLITE_BASE_DIR` controls where data is written.** It defaults to
+> `/Volumes/Transcend`; if that drive is not mounted, every hub constructor
+> raises a `PermissionError`/`FileNotFoundError` before it can do anything.
+> Set it to a local path (e.g. `./data`) on any machine without that drive.
+>
+> **NASA Earthdata `Token does not exist`:** if MODIS search/download fails
+> with `{"errors":["Token does not exist"]}`, a stale bearer token on the
+> `cmr.earthdata.nasa.gov` line of your `~/.netrc` is being sent by
+> `python-cmr`. Remove that line (or regenerate the token at
+> [urs.earthdata.nasa.gov](https://urs.earthdata.nasa.gov/)).
 
 ## <div align="center">Installation</div>
 
@@ -198,7 +210,7 @@ pressure_levels = None
 # Region boundary (min_lon, max_lon, min_lat, max_lat)
 boundary = (119, 123, 21, 26)
 
-# Define observation stations
+# Define observation stations (used at the process_data step, not fetch_data)
 STATIONS = [
     {"name": "FS", "lat": 22.6294, "lon": 120.3461},  # Kaohsiung Fengshan
     {"name": "NZ", "lat": 22.7422, "lon": 120.3339},  # Kaohsiung Nanzi
@@ -209,22 +221,27 @@ STATIONS = [
 # 2. Create data hub instance
 era5_hub = ERA5Hub(timezone='Asia/Taipei')
 
-# 3. Fetch data
+# 3. Fetch data ('all_at_once' or 'monthly')
 era5_hub.fetch_data(
     start_date=start_date,
     end_date=end_date,
     boundary=boundary,
     variables=variables,
     pressure_levels=pressure_levels,
-    stations=STATIONS,
+    download_mode='all_at_once',
 )
 
 # 4. Download data
 era5_hub.download_data()
 
-# 5. Process data
-era5_hub.process_data()
+# 5. Process data — extracts each station's time series to CSV.
+#    Pass `stations` here (not to fetch_data); without it nothing is written.
+era5_hub.process_data(stations=STATIONS)
 ```
+
+> [!NOTE]
+> Unlike Sentinel-5P and MODIS, the ERA5 pipeline does **not** render maps —
+> `process_data(stations=...)` extracts each station's values to CSV only.
 
 ## <div align="center">Data Sources</div>
 
