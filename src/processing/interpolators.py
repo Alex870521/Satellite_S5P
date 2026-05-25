@@ -10,7 +10,8 @@ class DataInterpolator:
 
     @staticmethod
     def griddata_interpolation(lon, lat, data, lon_grid, lat_grid, max_distance=0.1):
-        """使用 griddata 進行插值，只填充距離較近的網格點
+        """使用 griddata 進行插值，支持低解析度到高解析度的重採樣
+        當檢測到低解析度到高解析度重採樣時，自動使用最近鄰重採樣（像元複寫）
 
        Parameters:
        -----------
@@ -32,32 +33,73 @@ class DataInterpolator:
         if len(valid_data) == 0:
             return np.full_like(lon_grid, np.nan)
 
-        points = np.column_stack((valid_lon.flatten(), valid_lat.flatten()))
-        values = valid_data.flatten()
+        # 估算原始數據的像元大小
+        if len(valid_lon) > 1:
+            temp_tree = cKDTree(np.column_stack((valid_lon.flatten(), valid_lat.flatten())))
+            distances, _ = temp_tree.query(np.column_stack((valid_lon.flatten(), valid_lat.flatten())), k=2)
+            pixel_size = np.median(distances[:, 1])  # 第二近鄰距離
+        else:
+            pixel_size = max_distance
 
-        # 建立 KDTree 用於距離檢查
-        tree = cKDTree(points)
+        # 計算目標網格解析度
+        if lon_grid.shape[1] > 1:
+            grid_resolution_lon = abs(lon_grid[0, 1] - lon_grid[0, 0])
+        else:
+            grid_resolution_lon = 0.01
+            
+        if lat_grid.shape[0] > 1:
+            grid_resolution_lat = abs(lat_grid[1, 0] - lat_grid[0, 0])
+        else:
+            grid_resolution_lat = 0.01
 
-        # 將網格點轉換為適合 griddata 的格式
-        grid_points = np.column_stack((lon_grid.flatten(), lat_grid.flatten()))
+        # 判斷是否為低解析度到高解析度的重採樣
+        is_upsampling = (pixel_size > grid_resolution_lon * 1.5) or (pixel_size > grid_resolution_lat * 1.5)
+        
+        if is_upsampling:
+            # 低解析度到高解析度：使用最近鄰重採樣（像元複寫），以「格數」控制半徑
+            interpolated_values = np.full_like(lon_grid, np.nan)
 
-        # 查找每個網格點最近的原始數據點的距離
-        distances, _ = tree.query(grid_points, k=1)
+            # 使用經緯兩方向解析度的平均作為單一格距（近似）
+            cell_deg = float((grid_resolution_lon + grid_resolution_lat) / 2.0)
+            # 以 max_distance 換算要填補的格數（至少 1 格）
+            cells_to_fill = max(1, int(np.ceil(float(max_distance) / cell_deg)))
+            influence_radius = cells_to_fill * cell_deg
 
-        # 創建遮罩，只對距離在閾值內的點進行插值
-        mask = distances <= max_distance
+            # 為每個原始觀測點找到所有在影響範圍內的高解析度網格點
+            for obs_lon, obs_lat, obs_value in zip(valid_lon.flatten(), valid_lat.flatten(), valid_data.flatten()):
+                distances_to_obs = np.sqrt((lon_grid - obs_lon)**2 + (lat_grid - obs_lat)**2)
+                influence_mask = distances_to_obs <= influence_radius
+                interpolated_values[influence_mask] = obs_value
 
-        # 初始化結果數組為 NaN
-        grid_values = np.full(grid_points.shape[0], np.nan)
+            return interpolated_values
+        else:
+            # 一般情況：使用傳統的griddata插值
+            points = np.column_stack((valid_lon.flatten(), valid_lat.flatten()))
+            values = valid_data.flatten()
 
-        # 只對符合距離條件的點進行插值
-        if np.any(mask):
-            grid_values[mask] = griddata(points,
-                                         values,
-                                         grid_points[mask],
-                                         method='linear')
+            # 建立 KDTree 用於距離檢查
+            tree = cKDTree(points)
 
-        return grid_values.reshape(lon_grid.shape)
+            # 將網格點轉換為適合 griddata 的格式
+            grid_points = np.column_stack((lon_grid.flatten(), lat_grid.flatten()))
+
+            # 查找每個網格點最近的原始數據點的距離
+            distances, _ = tree.query(grid_points, k=1)
+
+            # 創建遮罩，只對距離在閾值內的點進行插值
+            mask = distances <= max_distance
+
+            # 初始化結果數組為 NaN
+            grid_values = np.full(grid_points.shape[0], np.nan)
+
+            # 只對符合距離條件的點進行插值
+            if np.any(mask):
+                grid_values[mask] = griddata(points,
+                                             values,
+                                             grid_points[mask],
+                                             method='linear')
+
+            return grid_values.reshape(lon_grid.shape)
 
     @staticmethod
     def kdtree_interpolation(lon, lat, data, lon_grid, lat_grid, max_distance=0.1):
