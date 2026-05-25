@@ -26,7 +26,12 @@ class MODISHub(SatelliteHub):
             raise EnvironmentError(
                 "Missing EARTHDATA credentials. Please set EARTHDATA_USERNAME and EARTHDATA_PASSWORD environment variables"
             )
-        return earthaccess.login()
+        # Log in with the .env credentials explicitly rather than the default
+        # strategy="all", which reads ~/.netrc first and silently shadows the
+        # documented EARTHDATA_USERNAME / EARTHDATA_PASSWORD setup.
+        # (A "Token does not exist" error later still points to ~/.netrc — see
+        # the reminder in fetch_data.)
+        return earthaccess.login(strategy="environment")
 
     def fetch_data(self,
                    file_type: str | Literal['MOD04_L2', 'MYD04_L2', 'MOD04_3K', 'MYD04_3K', 'MCD19A1', 'MCD19A2', 'MCD19A3D'],
@@ -34,7 +39,15 @@ class MODISHub(SatelliteHub):
                    end_date: str | datetime,
                    boundary: tuple = SEARCH_BOUNDARY
                    ) -> list:
-        """ """
+        """Search MODIS granules via earthaccess.
+
+        Note:
+            ``boundary`` is passed straight to earthaccess ``bounding_box`` and
+            therefore uses the order ``(west_lon, south_lat, east_lon, north_lat)``
+            — i.e. ``(min_lon, min_lat, max_lon, max_lat)``. This differs from
+            the Sentinel-5P / ERA5 hubs, which take
+            ``(min_lon, max_lon, min_lat, max_lat)``.
+        """
         self.file_type = file_type
         self.start_date, self.end_date = self._normalize_time_inputs(start_date, end_date, set_timezone=False)
 
@@ -42,11 +55,27 @@ class MODISHub(SatelliteHub):
         start_date_iso = self.start_date.strftime("%Y-%m-%dT%H:%M:%S.000Z")
         end_date_iso = self.end_date.strftime("%Y-%m-%dT%H:%M:%S.999Z")
 
-        products = earthaccess.search_data(
-            short_name=file_type,
-            temporal=(start_date_iso, end_date_iso),
-            bounding_box=boundary,
-        )
+        try:
+            products = earthaccess.search_data(
+                short_name=file_type,
+                temporal=(start_date_iso, end_date_iso),
+                bounding_box=boundary,
+            )
+        except RuntimeError as e:
+            # Reminder: this is almost always a ~/.netrc problem, not bad
+            # .env credentials. python-cmr sends a stale bearer token stored on
+            # the `cmr.earthdata.nasa.gov` line of ~/.netrc, which NASA rejects.
+            # It even breaks anonymous searches. Remove that line (keep the
+            # `urs.earthdata.nasa.gov` login) or regenerate the token at
+            # https://urs.earthdata.nasa.gov/ — updating .env will not help.
+            if "Token does not exist" in str(e):
+                raise RuntimeError(
+                    'NASA CMR rejected the request with {"errors":["Token does not exist"]}. '
+                    "This is a stale token in ~/.netrc, not your .env credentials: remove the "
+                    "`machine cmr.earthdata.nasa.gov` block from ~/.netrc (keep the "
+                    "`urs.earthdata.nasa.gov` login) and retry."
+                ) from e
+            raise
 
         # 進一步過濾結果，排除 NRT 文件
         filtered_products = []
