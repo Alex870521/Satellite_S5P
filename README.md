@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Python](https://img.shields.io/badge/Python-3.12-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-blue.svg)
 ![GitHub last commit](https://img.shields.io/github/last-commit/Alex870521/aeroviz?logo=github)
 
 </div>
@@ -76,13 +76,38 @@ Before using this toolkit, you need to complete the following steps:
 ```bash
 # Clone the repository
 git clone https://github.com/Alex870521/Satellite_S5P.git
-
-# Navigate to the directory
 cd Satellite_S5P
 
-# Install required packages
-pip install -r requirements.txt
+# Core install — downstream analysis & visualization (reads NetCDF only)
+pip install .
+
+# ...or add the HDF4 ingest extra, only if you need to convert raw MODIS .hdf files
+pip install ".[ingest]"
 ```
+
+> [!IMPORTANT]
+> **Reading raw MODIS HDF4 (`.hdf`) requires `pyhdf`**, which ships only in the
+> optional `[ingest]` extra. The core package and all downstream processing read
+> **NetCDF only** and do not need `pyhdf` — raw `.hdf` is converted to `.nc` once
+> at ingest, and everything else (plots, FNR, analysis) reads the NetCDF output.
+>
+> | What you do | Recommended Python | Needs `pyhdf`? |
+> |---|---|---|
+> | Downstream analysis (read `.nc`, plots, FNR) | 3.12 / 3.13 / **3.14** | No — `pip install .` |
+> | Convert raw `.hdf` → `.nc` (ingest) | **3.12 / 3.13** | Yes — `pip install ".[ingest]"` |
+>
+> ⚠️ **Python 3.14 + HDF4 ingest is not supported yet.** `pyhdf` has no 3.14 wheel
+> on any platform (including Windows `win_amd64`), so `pip install ".[ingest]"`
+> falls back to a source build and fails (missing HDF4 headers). Run the ingest /
+> conversion step under Python 3.12 or 3.13; keep 3.14 for analysis only.
+>
+> 🪟 **Windows users:** `pyhdf` provides wheels for Python 3.7–3.13 (`win_amd64`),
+> so `pip install ".[ingest]"` works out of the box on 3.12/3.13 — no conda or
+> manual HDF4 setup needed. On **Windows + Python 3.14**, run ingest under
+> 3.12/3.13 (or `conda install -c conda-forge pyhdf`); use 3.14 for analysis only.
+
+For a pinned development environment you can still use `pip install -r requirements.txt`
+(note: `pyhdf` there is ingest-only — see the comment in the file).
 
 ## <div align="center">Usage</div>
 
