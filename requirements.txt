@@ -25,5 +25,7 @@ schedule~=1.2.2
 cdsapi~=0.7.5
 sentinelsat~=1.2.1
 earthaccess~=0.14.0
+# ingest-only：讀原始 MODIS HDF4 才需要（對應 pyproject 的 [ingest] extra）。
+# 下游一律只讀 NetCDF，不需 pyhdf；注意目前尚無 Python 3.14 wheel。
 pyhdf~=0.11.6
 pytz~=2024.2

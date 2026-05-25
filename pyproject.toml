@@ -23,18 +23,47 @@ dependencies = [
     "netCDF4>=1.6.0",
     "pandas>=2.0.0",
     "shapely>=2.0.0",
+    # I/O, networking and CLI
+    "requests>=2.32.0",
+    "aiohttp>=3.10.0",
+    "rich>=13.9.0",
+    "python-dotenv>=1.0.0",
+    "python-dateutil>=2.9.0",
+    "pytz>=2024.1",
+    "certifi>=2024.8.30",
+    "schedule>=1.2.0",
+    # Imagery / animation
+    "imageio>=2.36.0",
+    "pillow>=10.4.0",
+    # Satellite data access
+    "cdsapi>=0.7.5",
+    "sentinelsat>=1.2.0",
+    "earthaccess>=0.14.0",
 ]
 
 [project.optional-dependencies]
+# HDF4 ingest only. Reading raw MODIS .hdf needs pyhdf (which bundles the HDF4
+# C library). Run conversion on a machine where pyhdf installs (macOS/remote/conda);
+# the analysis side reads NetCDF only and does not need this. No 3.14 wheel yet.
+ingest = [
+    "pyhdf>=0.11.6",
+]
 dev = [
     "flake8>=6.0.0",
     "black>=23.1.0",
     "mypy>=1.0.0",
     "isort>=5.12.0",
+    "pytest>=8.3.0",
 ]
 
 [tool.setuptools]
 packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "requires_data: test needs local satellite data files (skipped in CI)",
+]
 
 [tool.black]
 line-length = 100
