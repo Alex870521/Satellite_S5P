@@ -47,16 +47,19 @@ class FileProgressColumn(ProgressColumn):
         return f"{completed:5.1f} / {total:5.1f} MB"
 
 
-class SENTINEL5PHub(SatelliteHub):
-    # API name
-    name = "Sentinel-5P"
+class SentinelHubBase(SatelliteHub):
+    """Sentinel 衛星數據的基礎類別"""
+
+    # 子類別需要覆寫這些屬性
+    name = None  # 例如: "Sentinel-5P", "Sentinel-3"
+    collection_name = None  # 例如: "SENTINEL-5P", "SENTINEL-3"
 
     def __init__(self, max_workers: int = 5):
         super().__init__()
         self._processor = None  # 初始化為 None，延遲創建
 
         self.auth = CopernicusAuth()
-        self.downloader = Downloader()
+        self.downloader = Downloader(manifest_dir=self.raw_dir if hasattr(self, 'raw_dir') and self.raw_dir else None)
         self.base_url = COPERNICUS_BASE_URL
         self.max_workers = max_workers
         self._token_lock = threading.Lock()
@@ -116,7 +119,7 @@ class SENTINEL5PHub(SatelliteHub):
 
             # 構建基本篩選條件
             base_filter = (
-                f"Collection/Name eq 'SENTINEL-5P' "
+                f"Collection/Name eq '{self.collection_name}' "
                 f"and contains(Name,'{file_class}') "
                 f"and contains(Name,'{file_type}') "
                 f"and ContentDate/Start gt '{self.start_date.strftime('%Y-%m-%d')}T00:00:00.000Z' "
@@ -202,6 +205,9 @@ class SENTINEL5PHub(SatelliteHub):
                 # 顯示產品詳細資訊
                 if all_products:
                     DisplayManager().display_products(all_products)
+
+                if not all_products:
+                    print("There is no products to fetch. Please check the File class options.")
 
                 return all_products
 
@@ -498,7 +504,7 @@ class SENTINEL5PHub(SatelliteHub):
         return self._processor
 
     def process_data(self, pattern=None, start_date=None, end_date=None):
-        """處理下載的Sentinel-5P數據並生成可視化圖像"""
+        """處理下載的Sentinel數據並生成可視化圖像"""
         if not hasattr(self, 'file_class'):
             raise ValueError("未設置file_class，請先呼叫fetch_data方法")
 
@@ -522,10 +528,22 @@ class SENTINEL5PHub(SatelliteHub):
         else:
             date_range_str = "處理所有日期的數據"
 
-        self.logger.info(f"開始處理Sentinel-5P數據，{date_range_str}")
+        self.logger.info(f"開始處理{self.name}數據，{date_range_str}")
 
         # 使用處理器處理所有文件
         return self.processor.process_all_files(pattern, start_date, end_date)
+
+
+class SENTINEL5PHub(SentinelHubBase):
+    """Sentinel-5P 衛星數據 API"""
+    name = "Sentinel-5P"
+    collection_name = "SENTINEL-5P"
+
+
+class SENTINEL3Hub(SentinelHubBase):
+    """Sentinel-3 衛星數據 API"""
+    name = "Sentinel-3"
+    collection_name = "SENTINEL-3"
 
 
 if __name__ == '__main__':
