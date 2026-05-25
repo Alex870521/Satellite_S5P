@@ -24,17 +24,27 @@ CHUNK_SIZE = 8192
 DEFAULT_TIMEOUT = 60
 DOWNLOAD_TIMEOUT = 180
 
-# 存儲路徑
-BASE_DIR = Path("/Users/chanchihyu/DataCenter/Satellite")
+# 存儲路徑：可用環境變數 SATELLITE_BASE_DIR 覆寫（建議寫在 .env）。
+# 預設沿用外接碟；換機器只要設 SATELLITE_BASE_DIR，不需改碼。
+BASE_DIR = Path(os.getenv("SATELLITE_BASE_DIR", "/Volumes/Transcend"))
+
 
 # 地理範圍設定 (min_lon, max_lon, min_lat, max_lat)
 FILTER_BOUNDARY = (120, 122, 22, 25)  # (118, 124, 20, 27)
+# Taiwan regional boundary
 FIGURE_BOUNDARY = (119, 123, 21, 26)  # (100, 145, 0, 45)
 
 # 數據保留天數設定
 # 在使用pipeline下，超過這個天數的檔案將被自動清理
 DATA_RETENTION_DAYS = 30  # 預設保留30天
 
+# ERA5 相關配置
+ERA5_STATIONS = [
+    {"name": "FS", "lat": 22.6294, "lon": 120.3461},  # Kaohsiung Fengshan
+    {"name": "NZ", "lat": 22.7422, "lon": 120.3339},  # Kaohsiung Nanzi
+    {"name": "TH", "lat": 24.1817, "lon": 120.5956},  # Taichung
+    {"name": "TP", "lat": 25.0330, "lon": 121.5654}   # Taipei
+]
 
 """ I/O structure
 Main Folder (Sentinel_data)
