@@ -166,3 +166,9 @@ cython_debug/
 
 # Project-specific: anything whose name starts with "wip" (file or folder, at any level)
 wip*
+
+# Large / raw geodata — keep out of git (re-download or store externally).
+# Note: data/shapefiles/{stations,taiwan,China/gadm36_CHN_0.*} are tracked (used for plotting).
+data/TEMIS_UV/
+data/shapefiles/ne_10m_admin_0_countries_twn/
+data/shapefiles/China/gadm36_CHN_[123].*
