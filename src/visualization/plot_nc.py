@@ -39,31 +39,29 @@ def smooth_kernel(data, kernel_size=5):
     return convolve2d(data, kernel, mode='same', boundary='wrap') / np.sum(kernel)
 
 
-def plot_stations(ax, stations: list[str], label_offset: tuple[float, float] = (-0.2, 0)):
+def plot_stations(ax, stations: list[str] | str = 'all'):
     """繪製測站標記和標籤
 
     Args:
         ax: matplotlib axes
-        stations: 要標記的測站名稱列表
+        stations: 要標記的測站名稱列表，或 'all' 表示所有測站
         label_offset: (x偏移, y偏移)，用於調整標籤位置
     """
     # 讀取測站資料
     station_data = gpd.read_file(
         Path(__file__).parents[2] / "data/shapefiles/stations/空氣品質監測站位置圖_121_10704.shp"
     )
-    # 創建測站的 GeoDataFrame
-    station_geometry = [Point(xy) for xy in zip(station_data['TWD97Lon'], station_data['TWD97Lat'])]
 
-    # all station
-    # geodata = gpd.GeoDataFrame(station_data, crs=ccrs.PlateCarree(), geometry=station_geometry)
-    # geodata.plot(ax=ax, color='gray', markersize=10)
+    if stations == 'all':
+        # 使用所有測站
+        target_stations = station_data
+    else:
+        # 過濾出要標記的測站
+        target_stations = station_data[station_data['SiteName'].isin(stations)]
 
     # matplotlib 預設顏色和標記循環
-    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']  # 預設顏色循環
-    markers = ['o', 's', '^', 'v', 'D', '<', '>', 'p', '*']  # 標記循環
-
-    # 過濾出要標記的測站
-    target_stations = station_data[station_data['SiteName'].isin(stations)]
+    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    markers = ['o', 's', '^', 'v', 'D', '<', '>', 'p', '*']
 
     legend_labels = []
     legend_handles = []
@@ -84,15 +82,20 @@ def plot_stations(ax, stations: list[str], label_offset: tuple[float, float] = (
         legend_labels.append(row['SiteEngNam'])
         legend_handles.append(marker_obj)
 
-    # 添加圖例
-    ax.legend(handles=legend_handles,
-              labels=legend_labels,
-              loc='upper right',
-              bbox_to_anchor=(1, 1),
-              borderaxespad=0.)
+    # 如果測站太多，可能需要調整圖例
+    if len(legend_labels) > 10:
+        # 測站太多時，不顯示圖例或使用不同的顯示方式
+        print(f"顯示了 {len(legend_labels)} 個測站")
+    else:
+        # 添加圖例
+        ax.legend(handles=legend_handles,
+                  labels=legend_labels,
+                  loc='upper right',
+                  bbox_to_anchor=(1, 1),
+                  borderaxespad=0.)
 
 
-def basic_map(ax, map_scale='Taiwan', mark_stations=None):
+def basic_map(ax, map_scale='Taiwan', mark_stations=None, right_labels=False):
     """
     創建基本地圖，包含邊界、縣市、網格線等基礎元素
 
@@ -104,6 +107,8 @@ def basic_map(ax, map_scale='Taiwan', mark_stations=None):
         地圖比例尺，可選 'global', 'East_Asia', 'Taiwan'
     mark_stations : list or None
         需要標記的測站列表
+    right_labels : bool
+        是否在右側顯示Y軸標籤（默認False，保持向後兼容）
 
     Returns:
     --------
@@ -139,7 +144,12 @@ def basic_map(ax, map_scale='Taiwan', mark_stations=None):
         # 設定網格線
         gl = ax.gridlines(draw_labels=True, linestyle='--', alpha=0.7)
         gl.top_labels = False
-        gl.right_labels = False
+        if right_labels:
+            gl.left_labels = False
+            gl.right_labels = True
+        else:
+            gl.left_labels = True
+            gl.right_labels = False
         gl.xlocator = FixedLocator([119, 120, 121, 122, 123])  # 設定經度刻度
 
         # 標記測站
@@ -269,7 +279,8 @@ def plot_global_var(dataset: xr.Dataset | Path | str,
         plt.title(f'{datetime_str}', pad=20, fontdict={'weight': 'bold', 'fontsize': 24})
 
         plt.tight_layout()
-        plt.show()
+        # plt.show()
+        plt.close()
 
         if savefig_path is not None:
             fig.savefig(savefig_path, dpi=600)
@@ -356,18 +367,22 @@ def plot_map(dataset, product_params,
     if path is not None:
         fig.savefig(path)
 
-    plt.show()
+    # plt.show()
 
 
 if __name__ == "__main__":
-    file_group = '/Volumes/Transcend/Sentinel-5P/raw/NO2___/2024/03/S5P_OFFL_L2__NO2____20240314T031823_20240314T045953_33252_03_020600_20240315T192700.nc'
-    file_ungroup = '/Volumes/Transcend/Sentinel-5P/processed/NO2___/2024/01/S5P_OFFL_L2__NO2____20240110T045402_20240110T063532_32345_03_020600_20240111T211523.nc'
-    ds = xr.open_dataset(file_ungroup)
+    # file_group = '/Volumes/Transcend/Sentinel-5P/raw/NO2___/2024/03/S5P_OFFL_L2__NO2____20240314T031823_20240314T045953_33252_03_020600_20240315T192700.nc'
+    # file_ungroup = '/Volumes/Transcend/Sentinel-5P/processed/NO2___/2024/01/S5P_OFFL_L2__NO2____20240110T045402_20240110T063532_32345_03_020600_20240111T211523.nc'
+    # ds = xr.open_dataset(file_ungroup)
+    #
+    # from netCDF4 import Dataset
+    # nc = Dataset(file_ungroup, 'r').groups
 
-    from netCDF4 import Dataset
-    nc = Dataset(file_ungroup, 'r').groups
-
-    file = '/Volumes/Transcend/Sentinel-5P/raw/NO2___/2022/01/S5P_OFFL_L2__NO2____20220122T041706_20220122T055836_22158_02_020301_20220123T201801.nc'
-    plot_global_var(file, product_params=PRODUCT_CONFIGS['NO2___'], map_scale='Taiwan')
+    # file = '/Volumes/Transcend/Sentinel-5P/raw/NO2___/2022/01/S5P_OFFL_L2__NO2____20220122T041706_20220122T055836_22158_02_020301_20220123T201801.nc'
+    # plot_global_var(file, product_params=PRODUCT_CONFIGS['NO2___'], map_scale='Taiwan')
     # plot_map(ds, product_params=PRODUCT_CONFIGS['NO2___'], projection_type='platecarree')
     # plot_map(ds, product_params=PRODUCT_CONFIGS['NO2___'], projection_type='orthographic')
+
+    fig, ax = plt.subplots(figsize=(8, 6), subplot_kw={'projection': ccrs.PlateCarree()})
+    ax = basic_map(ax, map_scale='Taiwan', mark_stations='all')
+    plt.show()

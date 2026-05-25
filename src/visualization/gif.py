@@ -114,10 +114,32 @@ def animate_data(image_dir, output_path, date_type="auto", fps=2, resize=None, t
 
     # 準備圖片
     images = []
+    
+    # 檢查所有圖片的尺寸
+    img_sizes = []
     for filepath in image_files:
         img = Image.open(filepath)
+        img_sizes.append(img.size)
+    
+    # 找到最常見的尺寸作為目標尺寸
+    from collections import Counter
+    size_counter = Counter(img_sizes)
+    target_size = size_counter.most_common(1)[0][0]
+    
+    logger.info(f"檢測到 {len(set(img_sizes))} 種不同的圖片尺寸: {set(img_sizes)}")
+    logger.info(f"使用最常見的尺寸作為目標: {target_size}")
+    
+    for filepath in image_files:
+        img = Image.open(filepath)
+        
+        # 如果指定了resize，使用指定的尺寸
         if resize:
             img = img.resize(resize, Image.Resampling.LANCZOS)
+        # 否則調整到最常見的尺寸
+        elif img.size != target_size:
+            logger.info(f"調整圖片 {filepath.name} 從 {img.size} 到 {target_size}")
+            img = img.resize(target_size, Image.Resampling.LANCZOS)
+        
         images.append(np.array(img))
 
     logger.info(f"找到 {len(images)} 張圖片")
@@ -133,3 +155,8 @@ def animate_data(image_dir, output_path, date_type="auto", fps=2, resize=None, t
     logger.info(f"動畫製作完成：{output_path}")
 
     return output_path
+
+if __name__ == "__main__":
+    image_dir = Path.home() / 'Desktop' / 'test_gif'
+    output_path = image_dir / 'S5P.gif'
+    animate_data(image_dir, output_path)

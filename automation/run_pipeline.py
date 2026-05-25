@@ -1,161 +1,374 @@
 """
-自動衛星數據處理Pipeline
-每天早上8點自動獲取、處理並繪製當天的衛星數據
-包含檔案自動清理功能，避免檔案不斷累積
+衛星數據處理Pipeline Controller
+採用物件導向設計，提供更好的錯誤處理和資源管理
 """
-import os
 import logging
 import asyncio
-import time
+import threading
+import concurrent.futures
 from datetime import datetime, timedelta
+from pathlib import Path
 import schedule
-from src.api import SENTINEL5PHub, MODISHub
-from src.config.settings import FILTER_BOUNDARY, DATA_RETENTION_DAYS, BASE_DIR
+
+from src.api import SENTINEL5PHub, MODISHub, ERA5Hub
+from src.config.settings import FILTER_BOUNDARY, FIGURE_BOUNDARY, DATA_RETENTION_DAYS, BASE_DIR, ERA5_STATIONS
+from src.config.credentials import check_credentials
 from src.utils.file_retention_manager import FileRetentionManager
 
 
-# 配置日誌
-def setup_logging():
-    """設置日誌配置"""
-    # 創建日誌目錄
-    log_dir = os.path.join(BASE_DIR, 'logs')
-    os.makedirs(log_dir, exist_ok=True)
+class SatelliteDataController:
+    """衛星數據處理控制器"""
 
-    # 配置根日誌器
-    log_file = os.path.join(log_dir, f'satellite_pipeline_{datetime.now().strftime("%Y-%m-%d")}.log')
+    def __init__(self, data_root: Path):
+        self.logger = self._setup_logging()
+        self.data_root = data_root
 
-    # 改進的日誌格式，加入模組名稱
-    log_format = '%(asctime)s - [%(name)s] - %(levelname)s - %(message)s'
+        # 創建線程池執行器
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-    # 配置根日誌器
-    logging.basicConfig(
-        level=logging.INFO,
-        format=log_format,
-        handlers=[
-            # 文件處理器 - 保存到文件
-            logging.FileHandler(log_file),
-            # 控制台處理器 - 輸出到控制台
-            logging.StreamHandler()
-        ]
-    )
+        # ERA5 配置
+        self.era5_stations = ERA5_STATIONS
+        self.era5_boundary = FIGURE_BOUNDARY
 
-    return logging.getLogger(__name__)
+        # 追蹤正在處理的檔案，防止清理時刪除
+        self._processing_lock = threading.Lock()
+        self._processing_dirs: set[str] = set()
 
-# 初始化日誌
-logger = setup_logging()
+    def _setup_logging(self):
+        """設置日誌配置"""
+        log_dir = BASE_DIR / 'logs'
+        log_dir.mkdir(exist_ok=True)
 
+        log_file = log_dir / f'satellite_pipeline_{datetime.now().strftime("%Y-%m-%d")}.log'
+        log_format = '%(asctime)s - [%(name)s] - %(levelname)s - %(message)s'
 
-async def daily_task():
-    """每日執行的任務"""
-    logger.info("開始執行每日衛星數據處理任務")
-
-    # 設定參數 - 只處理當天的數據
-    today = datetime.now()
-    seven_days_ago = datetime.now() - timedelta(days=7)
-
-    # 開始執行 Sentinel-5P
-    file_class: str = 'NRTI'
-    file_type: list[str] = ['NO2___', 'HCHO__', 'CO____']
-
-    for file_tp in file_type:
-        # 檢查並下載當天的數據
-
-        sentinel_hub = SENTINEL5PHub(max_workers=3)
-        products = sentinel_hub.fetch_data(file_class=file_class,
-                                           file_type=file_tp,
-                                           start_date=seven_days_ago,
-                                           end_date=today,
-                                           boundary=FILTER_BOUNDARY)
-
-        if products:
-            sentinel_hub.download_data(products)
-            success = sentinel_hub.process_data()
-            if success:
-                logger.info(f"每日衛星數據處理pipeline執行完成 - {today}")
-            else:
-                logger.error(f"處理數據失敗 - {today}")
-        else:
-            logger.info(f"今日({today})無可用的衛星數據")
-
-    # 開始執行 MODIS
-    file_type: list[str] = ['MYD04_L2', 'MOD04_L2', 'MCD19A2']
-
-    for file_tp in file_type:
-
-        # 檢查並下載當天的數據
-        modis_hub = MODISHub()
-        products = modis_hub.fetch_data(file_type=file_tp, start_date=seven_days_ago, end_date=today)
-
-        # 如果有數據，則處理並繪製
-        if products:
-            modis_hub.download_data(products)
-            success = modis_hub.process_data()
-            if success:
-                logger.info(f"每日衛星數據處理pipeline執行完成 - {today}")
-            else:
-                logger.error(f"處理數據失敗 - {today}")
-        else:
-            logger.info(f"今日({today})無可用的衛星數據")
-
-def clean_all_data():
-    """清理所有衛星數據"""
-    logger.info("開始執行週期性檔案清理...")
-
-    cleaner = FileRetentionManager(retention_days=DATA_RETENTION_DAYS)
-
-    # 清理 Sentinel-5P 數據
-    sentinel_dir = BASE_DIR / "Sentinel-5P"
-    if sentinel_dir.exists():
-        sentinel_results = cleaner.clean_satellite_data(
-            sentinel_dir,
-            file_extensions=[".png", ".nc", ".tiff"]
+        logging.basicConfig(
+            level=logging.INFO,
+            format=log_format,
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler()
+            ]
         )
-        logger.info(
-            f"Sentinel-5P 清理完成: {sum(r.get('cleaned_files', 0) for r in sentinel_results.values() if isinstance(r, dict))} 檔案")
 
-    # 清理 MODIS 數據
-    modis_dir = BASE_DIR / "MODIS"
-    if modis_dir.exists():
-        modis_results = cleaner.clean_satellite_data(
-            modis_dir,
-            file_extensions=[".png", ".hdf"]
-        )
-        logger.info(
-            f"MODIS 清理完成: {sum(r.get('cleaned_files', 0) for r in modis_results.values() if isinstance(r, dict))} 檔案")
+        return logging.getLogger(self.__class__.__name__)
 
-    logger.info("所有數據清理完成")
+    def get_current_half_year_period(self):
+        """獲取當前日期對應的半年期間"""
+        current_date = datetime.now()
+        year = current_date.year
 
-def schedule_task():
-    """設定定時任務"""
-    logger.info("啟動衛星數據自動處理服務")
+        if current_date.month <= 6:
+            start_date = datetime(year, 1, 1)
+            end_date = datetime(year, 6, 30)
+        else:
+            start_date = datetime(year, 7, 1)
+            end_date = datetime(year, 12, 31)
 
-    # 每天早上8點執行數據處理
-    schedule.every().day.at("08:00").do(lambda: asyncio.run(daily_task()))
+        return start_date, end_date, f"{start_date.strftime('%Y%m%d')}-{end_date.strftime('%Y%m%d')}"
 
-    # 設定每週清理任務（例如每週日清理）
-    schedule.every().sunday.at("01:00").do(clean_all_data)
+    def should_update_era5_data(self):
+        """判斷是否需要更新 ERA5 數據（檔案不存在或已過期才更新）"""
+        start_date, _, current_period = self.get_current_half_year_period()
+        era5_dir = BASE_DIR / "ERA5"
 
-    # 系統啟動時立即執行一次（無條件）
-    logger.info("系統啟動，立即執行一次數據處理")
-    asyncio.run(daily_task())
+        if era5_dir.exists():
+            for file in era5_dir.iterdir():
+                if file.is_file() and current_period in file.name:
+                    # 檔案存在，檢查是否需要增量更新（每週更新一次以補齊新資料）
+                    file_mtime = datetime.fromtimestamp(file.stat().st_mtime)
+                    days_since_update = (datetime.now() - file_mtime).days
+                    if days_since_update < 7:
+                        self.logger.info(f"ERA5 文件 {file.name} 於 {days_since_update} 天前更新，跳過")
+                        return False
+                    self.logger.info(f"ERA5 文件 {file.name} 已超過 7 天未更新，將進行更新")
+                    return True
 
-    logger.info("系統啟動，立即執行檔案清理")
-    clean_all_data()
+        self.logger.info(f"未找到當前期間 ({current_period}) 的 ERA5 文件，將創建新文件")
+        return True
 
-    while True:
-        schedule.run_pending()
-        time.sleep(3600)  # 每小時檢查一次是否有待執行的任務
+    def _mark_processing(self, data_type: str):
+        """標記某資料類型正在處理中"""
+        with self._processing_lock:
+            self._processing_dirs.add(data_type)
+
+    def _unmark_processing(self, data_type: str):
+        """取消標記某資料類型的處理狀態"""
+        with self._processing_lock:
+            self._processing_dirs.discard(data_type)
+
+    def _is_processing(self, data_type: str) -> bool:
+        """檢查某資料類型是否正在處理中"""
+        with self._processing_lock:
+            return data_type in self._processing_dirs
+
+    async def daily_satellite_task(self):
+        """每日衛星數據處理任務（各資料源獨立執行，互不影響）"""
+        self.logger.info("開始執行每日衛星數據處理任務")
+
+        today = datetime.now()
+        thirty_days_ago = today - timedelta(days=30)
+        results = {}
+
+        # 處理 Sentinel-5P（失敗不影響 MODIS）
+        try:
+            await self._process_sentinel5p(thirty_days_ago, today)
+            results['sentinel5p'] = 'success'
+        except Exception as e:
+            self.logger.error(f"Sentinel-5P 處理失敗: {str(e)}")
+            results['sentinel5p'] = f'failed: {e}'
+
+        # 處理 MODIS（失敗不影響其他）
+        try:
+            await self._process_modis(thirty_days_ago, today)
+            results['modis'] = 'success'
+        except Exception as e:
+            self.logger.error(f"MODIS 處理失敗: {str(e)}")
+            results['modis'] = f'failed: {e}'
+
+        # 彙總結果
+        failed = [k for k, v in results.items() if v != 'success']
+        if failed:
+            self.logger.warning(f"每日任務部分失敗: {', '.join(failed)}")
+        else:
+            self.logger.info("每日衛星數據處理任務全部完成")
+
+    async def _process_sentinel5p(self, start_date, end_date):
+        """處理 Sentinel-5P 數據"""
+        file_class = 'NRTI'
+        # TODO: 暫時只跑 NO2；要恢復完整集合改回 ['NO2___', 'HCHO__', 'CO____']
+        file_types = ['NO2___']
+
+        self._mark_processing("Sentinel-5P")
+        try:
+            for file_type in file_types:
+                try:
+                    self.logger.info(f"處理 Sentinel-5P {file_type} 數據")
+
+                    sentinel_hub = SENTINEL5PHub(max_workers=3)
+                    products = sentinel_hub.fetch_data(
+                        file_class=file_class,
+                        file_type=file_type,
+                        start_date=start_date,
+                        end_date=end_date,
+                        boundary=FILTER_BOUNDARY
+                    )
+
+                    if products:
+                        sentinel_hub.download_data(products)
+                        success = sentinel_hub.process_data()
+
+                        if success:
+                            self.logger.info(f"Sentinel-5P {file_type} 處理成功")
+                        else:
+                            self.logger.error(f"Sentinel-5P {file_type} 處理失敗")
+                    else:
+                        self.logger.info(f"無可用的 Sentinel-5P {file_type} 數據")
+
+                except Exception as e:
+                    self.logger.error(f"Sentinel-5P {file_type} 處理出錯: {str(e)}")
+                    continue  # 繼續處理下一個類型
+        finally:
+            self._unmark_processing("Sentinel-5P")
+
+    async def _process_modis(self, start_date, end_date):
+        """處理 MODIS 數據"""
+        file_types = ['MYD04_L2', 'MOD04_L2', 'MCD19A2']
+
+        self._mark_processing("MODIS")
+        try:
+            for file_type in file_types:
+                try:
+                    self.logger.info(f"處理 MODIS {file_type} 數據")
+
+                    modis_hub = MODISHub()
+                    products = modis_hub.fetch_data(
+                        file_type=file_type,
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+
+                    if products:
+                        modis_hub.download_data(products)
+                        success = modis_hub.process_data()
+
+                        if success:
+                            self.logger.info(f"MODIS {file_type} 處理成功")
+                        else:
+                            self.logger.error(f"MODIS {file_type} 處理失敗")
+                    else:
+                        self.logger.info(f"無可用的 MODIS {file_type} 數據")
+
+                except Exception as e:
+                    self.logger.error(f"MODIS {file_type} 處理出錯: {str(e)}")
+                    continue  # 繼續處理下一個類型
+        finally:
+            self._unmark_processing("MODIS")
+
+    async def monthly_era5_task(self):
+        """每月 ERA5 邊界層高度數據處理任務"""
+        self.logger.info("開始執行每月 ERA5 邊界層高度數據處理任務")
+
+        try:
+            if not self.should_update_era5_data():
+                self.logger.info("當前期間的 ERA5 數據已是最新，跳過更新")
+                return
+
+            start_date, end_date, period_name = self.get_current_half_year_period()
+
+            self.logger.info(f"正在處理期間: {period_name}")
+
+            era5_hub = ERA5Hub(timezone='Asia/Taipei')
+
+            # 獲取數據
+            era5_hub.fetch_data(
+                start_date=start_date,
+                end_date=end_date,
+                boundary=self.era5_boundary,
+                variables=['boundary_layer_height'],
+                pressure_levels=None,
+                download_mode='all_at_once'
+            )
+
+            # 下載數據
+            era5_hub.download_data()
+
+            # 處理數據
+            era5_hub.process_data(stations=self.era5_stations)
+
+            self.logger.info(f"ERA5 邊界層高度數據處理完成 - 期間: {period_name}")
+
+        except Exception as e:
+            self.logger.error(f"ERA5 數據處理失敗: {str(e)}")
+            raise
+
+    def run_era5_task(self):
+        """每週執行 ERA5 數據處理任務"""
+        current_date = datetime.now()
+        self.logger.info(f"每週 ERA5 任務執行 ({current_date.strftime('%Y-%m-%d %H:%M')})")
+        asyncio.run(self.monthly_era5_task())
+
+    def clean_data_task(self):
+        """數據清理任務（跳過正在處理中的資料類型）"""
+        self.logger.info("開始執行週期性檔案清理...")
+
+        try:
+            cleaner = FileRetentionManager(retention_days=DATA_RETENTION_DAYS)
+
+            # 清理 Sentinel-5P 數據（跳過處理中）
+            if self._is_processing("Sentinel-5P"):
+                self.logger.info("Sentinel-5P 正在處理中，跳過清理")
+            else:
+                self._clean_satellite_data(cleaner, "Sentinel-5P", [".png", ".nc", ".tiff"])
+
+            # 清理 MODIS 數據（跳過處理中）
+            if self._is_processing("MODIS"):
+                self.logger.info("MODIS 正在處理中，跳過清理")
+            else:
+                self._clean_satellite_data(cleaner, "MODIS", [".png", ".hdf"])
+
+            # ERA5 數據不清理
+            self.logger.info("ERA5 數據跳過清理（保留所有歷史數據）")
+
+            self.logger.info("所有數據清理完成")
+
+        except Exception as e:
+            self.logger.error(f"數據清理任務失敗: {str(e)}")
+
+    def _clean_satellite_data(self, cleaner, data_type, extensions):
+        """清理指定類型的衛星數據"""
+        data_dir = BASE_DIR / data_type
+        if data_dir.exists():
+            results = cleaner.clean_satellite_data(data_dir, file_extensions=extensions)
+            cleaned_count = sum(
+                r.get('cleaned_files', 0) for r in results.values()
+                if isinstance(r, dict)
+            )
+            self.logger.info(f"{data_type} 清理完成: {cleaned_count} 檔案")
+
+    def run_main_pipeline(self):
+        """運行主要的數據處理流程"""
+        self.logger.info("開始執行主要數據處理流程")
+
+        try:
+            # 執行每日衛星數據任務
+            asyncio.run(self.daily_satellite_task())
+            self.logger.info("主要數據處理流程完成")
+
+        except Exception as e:
+            self.logger.error(f"主要數據處理流程失敗: {str(e)}")
+
+    def _run_scheduler(self):
+        """在獨立線程中運行排程器"""
+        while not self._stop_event.is_set():
+            schedule.run_pending()
+            self._stop_event.wait(timeout=60)  # 每 60 秒檢查一次，可被中斷
+
+    def start_pipeline(self):
+        """啟動數據處理流程"""
+        self.logger.info("啟動衛星數據自動處理服務")
+
+        # 啟動前驗證所有 API 憑證
+        report = check_credentials(health_check=True)
+        if not report.all_ok:
+            self.logger.error("API 憑證驗證失敗，請修正後再啟動 pipeline")
+            return
+
+        self._stop_event = threading.Event()
+
+        # 清除現有排程
+        schedule.clear()
+
+        # 設定排程任務
+        schedule.every().day.at("08:00").do(self.run_main_pipeline)
+        schedule.every().sunday.at("02:00").do(self.run_era5_task)
+        schedule.every().sunday.at("01:00").do(self.clean_data_task)
+
+        self.logger.info("排程已設定: 每日 08:00 主管線 | 週日 02:00 ERA5 | 週日 01:00 清理")
+
+        # 系統啟動時立即執行
+        try:
+            self.logger.info("系統啟動，立即執行一次 ERA5 數據處理")
+            asyncio.run(self.monthly_era5_task())
+        except Exception as e:
+            self.logger.error(f"初始 ERA5 執行失敗: {str(e)}")
+
+        # 在獨立線程中運行排程器，主線程保持回應
+        scheduler_thread = threading.Thread(target=self._run_scheduler, daemon=True)
+        scheduler_thread.start()
+        self.logger.info("排程器已在背景線程啟動（每 60 秒檢查一次）")
+
+        try:
+            scheduler_thread.join()  # 等待排程線程（直到 stop_event 被設定）
+        except KeyboardInterrupt:
+            self.logger.info("收到停止訊號，正在關閉服務...")
+            self._stop_event.set()
+            scheduler_thread.join(timeout=10)
+            self.logger.info("服務已停止")
+        finally:
+            self._cleanup()
+
+    def _cleanup(self):
+        """清理資源"""
+        if hasattr(self, '_stop_event'):
+            self._stop_event.set()
+        if hasattr(self, 'executor'):
+            self.executor.shutdown(wait=True, cancel_futures=True)
+
+    def __del__(self):
+        """清理資源"""
+        self._cleanup()
 
 
 def main():
     """主函數"""
     try:
-        # 啟動定時任務
-        schedule_task()
-    except KeyboardInterrupt:
-        logger.info("服務已停止")
+        controller = SatelliteDataController(BASE_DIR)
+        controller.start_pipeline()
+
     except Exception as e:
-        logger.error(f"服務發生錯誤: {str(e)}")
+        logging.error(f"Pipeline 啟動失敗: {str(e)}")
+        raise
 
 
 if __name__ == "__main__":

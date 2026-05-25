@@ -19,7 +19,10 @@ def extract_datetime_from_filename(filename, to_local=True, local_tz='Asia/Taipe
     date_obj = None
 
     # Sentinel-5P 格式
-    s5p_match = re.search(r'S5P_\w+_\w+__\w+____(\d{8}T\d{6})_', filename)
+    # 匹配格式: S5P_OFFL_L2__HCHO___20241231T033759_...
+    # 產品類型部分可能有多個下劃線，需要更靈活的匹配
+    # 確保匹配到第一個日期時間（開始時間）
+    s5p_match = re.search(r'S5P_\w+_\w+__\w+_+(\d{8}T\d{6})_', filename)
     if s5p_match:
         date_str = s5p_match.group(1)
         date_obj = datetime.strptime(date_str, '%Y%m%dT%H%M%S')
