@@ -231,8 +231,8 @@ class CredentialValidator:
         username = os.getenv('EARTHDATA_USERNAME')
         password = os.getenv('EARTHDATA_PASSWORD')
 
-        # earthaccess login test via URS endpoint
-        resp = requests.get(
+        # earthaccess login test via URS endpoint (must be POST; GET returns 401)
+        resp = requests.post(
             'https://urs.earthdata.nasa.gov/api/users/find_or_create_token',
             auth=(username, password),
             timeout=15,
