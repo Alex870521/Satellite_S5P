@@ -1,6 +1,7 @@
 Cartopy~=0.24.1
 numpy~=2.1.2
 xarray~=2024.10.0
+dask[array]>=2024.1.0
 matplotlib~=3.9.2
 geopandas~=1.0.1
 scipy~=1.14.1

@@ -455,7 +455,17 @@ class ERA5Hub(SatelliteHub):
             if extract_surrounding:
                 self.logger.info("Will extract 3x3 grid (9 points) around each station")
 
-            ds = xr.open_dataset(netcdf_file, chunks='auto')
+            try:
+                ds = xr.open_dataset(netcdf_file, chunks='auto')
+            except ValueError as e:
+                # dask is not installed — fall back to eager load.
+                if 'chunk manager' not in str(e):
+                    raise
+                self.logger.warning(
+                    "dask not available; opening NetCDF without chunking. "
+                    "Install with: pip install 'dask[array]'"
+                )
+                ds = xr.open_dataset(netcdf_file)
 
             # Ensure target variables exist in the dataset (considering aliases)
             self.logger.info(f"Requested variables: {variables}, ds.data_vars: {list(ds.data_vars)}")

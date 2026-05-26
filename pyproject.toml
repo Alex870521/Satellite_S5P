@@ -16,6 +16,7 @@ authors = [
 dependencies = [
     "numpy>=1.26.0",
     "xarray>=2023.1.0",
+    "dask[array]>=2024.1.0",
     "scipy>=1.12.0",
     "matplotlib>=3.7.0",
     "cartopy>=0.22.0",
