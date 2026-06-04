@@ -17,29 +17,21 @@ from src.api import GEMSHub
 
 
 def main():
-    """標準流程：fetch → download → process。"""
-    # 1. 設定參數
-    start_date, end_date = '2023-05-15', '2023-05-15'
-    product_type = 'NO2'
+    """標準用法：run_pipeline 一次完成 fetch → download → process。
 
-    # 2. 建立 data hub（需 .env 內的 GEMS_API_KEY）
-    gems_hub = GEMSHub()
+    要分步細控可改用 fetch_data() / download_data() / process_data()。
+    """
+    gems_hub = GEMSHub()  # 需 .env 內的 GEMS_API_KEY
 
-    # 3. 查詢檔案清單（GEMS 白天每小時一檔）
-    products = gems_hub.fetch_data(
-        product_type=product_type,
-        start_date=start_date,
-        end_date=end_date,
-        ver=None,        # None = 線上自動解析最新版（如 NO2 v4.0.1）
-        level='L2',
+    # Product types: 'NO2', 'O3'/'O3T', 'O3P', 'SO2', 'HCHO', 'CHOCHO',
+    #                'AOD'/'AERAOD', 'AEH', 'UVI', 'CLOUD'
+    gems_hub.run_pipeline(
+        product_type='NO2',
+        start_date='2023-05-15',
+        end_date='2023-05-15',
+        ver=None,                          # None = 線上自動解析最新版（如 NO2 v4.0.1）
+        extract_bbox=(119, 123, 21, 26),   # server 端台灣裁切：~270MB → ~數MB/檔
     )
-
-    # 4. 下載原始 swath
-    if products:
-        gems_hub.download_data(products)
-
-        # 5. 網格化（QC → 內插到台灣網格）→ NetCDF + 圖 + 月動畫
-        gems_hub.process_data(start_date=start_date, end_date=end_date)
 
 
 def main_streaming_backfill():

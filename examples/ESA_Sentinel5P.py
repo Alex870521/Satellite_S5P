@@ -83,43 +83,24 @@ def main():
     sentinel_hub = SENTINEL5PHub(max_workers=3)
     
     # =============================================================================
-    # 3. 獲取產品列表
+    # 3. 執行完整管線 (fetch → download → process)
     # =============================================================================
-    
-    print("🔍 正在獲取產品列表...")
-    products = sentinel_hub.fetch_data(
+    # run_pipeline 一次完成抓清單、下載、網格化繪圖；
+    # 要分步細控可改用 fetch_data() / download_data() / process_data()。
+    print("🚀 執行 Sentinel-5P 管線...")
+    products = sentinel_hub.run_pipeline(
         file_class=file_class,      # 處理類別
         file_type=file_type,       # 產品類型
         start_date=start_date,     # 開始日期
         end_date=end_date,         # 結束日期
         boundary=boundary,         # 地理邊界
     )
-    
+
     if not products:
         print("❌ 未找到符合條件的產品，請檢查參數設置")
         return
-    
-    print(f"✅ 找到 {len(products)} 個產品")
-    
-    # =============================================================================
-    # 4. 下載數據
-    # =============================================================================
-    
-    print("📥 開始下載數據...")
-    # 下載所有產品文件
-    # show_progress=True 會顯示下載進度條
-    sentinel_hub.download_data(products, show_progress=True)
-    
-    # =============================================================================
-    # 5. 處理數據
-    # =============================================================================
-    
-    print("⚙️ 開始處理數據...")
-    # 處理下載的數據並生成可視化圖像
-    # 這會創建處理後的 NetCDF 文件和圖像
-    sentinel_hub.process_data()
-    
-    print("✅ 數據處理完成！")
+
+    print(f"✅ 完成，共處理 {len(products)} 個產品")
     
     # =============================================================================
     # 6. 可選：提取站點數據 (已註釋)

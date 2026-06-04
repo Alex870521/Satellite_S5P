@@ -20,18 +20,13 @@ def main():
     # 2. Create data hub instance
     modis_hub = MODISHub()
 
-    # 3. Fetch data
-    products = modis_hub.fetch_data(
+    # 3. Run the full pipeline: fetch -> download -> process.
+    #    Use fetch_data() / download_data() / process_data() separately for granular control.
+    modis_hub.run_pipeline(
         file_type=modis_product_type,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
     )
-
-    # 4. Download data
-    modis_hub.download_data(products)
-
-    # 5. Process data
-    modis_hub.process_data()
 
 
 if __name__ == "__main__":

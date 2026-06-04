@@ -49,29 +49,25 @@ def main():
     # 2. Create data hub instance
     era5_hub = ERA5Hub(timezone='Asia/Taipei')
 
-    # 3. Fetch data
-    era5_hub.fetch_data(
+    # Observation stations — ERA5 extracts each to CSV (required, else nothing is written)
+    STATIONS = [
+        {"name": "FS", "lat": 22.6294, "lon": 120.3461},  # Kaohsiung Fengshan
+        {"name": "NZ", "lat": 22.7422, "lon": 120.3339},  # Kaohsiung Nanzi
+        {"name": "TH", "lat": 24.1817, "lon": 120.5956},  # Taichung
+        {"name": "TP", "lat": 25.0330, "lon": 121.5654},  # Taipei
+    ]
+
+    # 3. Run the full pipeline: fetch -> download -> process (per-station CSV).
+    #    Use fetch_data() / download_data() / process_data() separately for granular control.
+    era5_hub.run_pipeline(
         start_date=start_date,
         end_date=end_date,
         boundary=boundary,
         variables=variables,
         pressure_levels=pressure_levels,
-        download_mode='all_at_once'
+        download_mode='all_at_once',
+        stations=STATIONS,
     )
-
-    # 4. Download data
-    era5_hub.download_data()
-
-    # 5. Process data
-    # Define observation stations
-    # STATIONS = [
-    #     {"name": "FS", "lat": 22.6294, "lon": 120.3461},  # Kaohsiung Fengshan
-    #     {"name": "NZ", "lat": 22.7422, "lon": 120.3339},  # Kaohsiung Nanzi
-    #     {"name": "TH", "lat": 24.1817, "lon": 120.5956},  # Taichung
-    #     {"name": "TP", "lat": 25.0330, "lon": 121.5654}   # Taipei
-    # ]
-    #
-    # era5_hub.process_data(STATIONS)
 
 
 if __name__ == "__main__":
