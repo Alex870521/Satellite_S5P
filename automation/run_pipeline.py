@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import schedule
 
-from src.api import SENTINEL5PHub, MODISHub, ERA5Hub
+from src.api import SENTINEL5PHub, MODISHub, ERA5Hub, GEMSHub
 from src.config.settings import FILTER_BOUNDARY, FIGURE_BOUNDARY, DATA_RETENTION_DAYS, BASE_DIR, ERA5_STATIONS
 from src.config.credentials import check_credentials
 from src.utils.file_retention_manager import FileRetentionManager
@@ -126,6 +126,14 @@ class SatelliteDataController:
             self.logger.error(f"MODIS 處理失敗: {str(e)}")
             results['modis'] = f'failed: {e}'
 
+        # 處理 GEMS（失敗不影響其他）
+        try:
+            await self._process_gems(thirty_days_ago, today)
+            results['gems'] = 'success'
+        except Exception as e:
+            self.logger.error(f"GEMS 處理失敗: {str(e)}")
+            results['gems'] = f'failed: {e}'
+
         # 彙總結果
         failed = [k for k, v in results.items() if v != 'success']
         if failed:
@@ -205,6 +213,40 @@ class SatelliteDataController:
         finally:
             self._unmark_processing("MODIS")
 
+    async def _process_gems(self, start_date, end_date):
+        """處理 GEMS 數據（streaming run_pipeline：逐檔下載→網格化→刪原始）。
+
+        用 server 端區域裁切（extract_bbox=台灣）把每檔降到數 MB，`skip_existing`
+        可斷點續傳 → 每天只補新時次。`keep_raw=False` 只刪「本次剛下載的小原始檔」，
+        不動既有 processed/figure 歷史（GEMS 歷史 archive 不在清理範圍內）。
+        """
+        product_types = ['NO2']  # 目前只跑 NO2（與既有 archive 一致）
+
+        self._mark_processing("GEMS")
+        try:
+            for product_type in product_types:
+                try:
+                    self.logger.info(f"處理 GEMS {product_type} 數據")
+
+                    gems_hub = GEMSHub()
+                    stats = gems_hub.run_pipeline(
+                        product_type=product_type,
+                        start_date=start_date,
+                        end_date=end_date,
+                        extract_bbox=FIGURE_BOUNDARY,  # (lon_min,lon_max,lat_min,lat_max) 台灣
+                        max_workers=3,                 # 對政府 API 保守
+                        skip_existing=True,            # 可續傳，只補新時次
+                        keep_raw=False,                # 網格化後刪本次下載的小原始檔
+                        make_figures=True,
+                    )
+                    self.logger.info(f"GEMS {product_type} 完成: {stats}")
+
+                except Exception as e:
+                    self.logger.error(f"GEMS {product_type} 處理出錯: {str(e)}")
+                    continue  # 繼續處理下一個類型
+        finally:
+            self._unmark_processing("GEMS")
+
     async def monthly_era5_task(self):
         """每月 ERA5 邊界層高度數據處理任務"""
         self.logger.info("開始執行每月 ERA5 邊界層高度數據處理任務")
@@ -266,6 +308,13 @@ class SatelliteDataController:
                 self.logger.info("MODIS 正在處理中，跳過清理")
             else:
                 self._clean_satellite_data(cleaner, "MODIS", [".png", ".hdf"])
+
+            # 清理 GEMS 數據（跳過處理中）。run_pipeline 已刪本次原始檔，
+            # 這裡按 retention 清理超過保留天數的 processed/figure 輸出。
+            if self._is_processing("GEMS"):
+                self.logger.info("GEMS 正在處理中，跳過清理")
+            else:
+                self._clean_satellite_data(cleaner, "GEMS", [".png", ".nc"])
 
             # ERA5 數據不清理
             self.logger.info("ERA5 數據跳過清理（保留所有歷史數據）")
