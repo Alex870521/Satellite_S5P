@@ -109,6 +109,26 @@ class SatelliteHub(ABC):
         """Process downloaded data"""
         pass
 
+    def run_pipeline(self, **kwargs):
+        """One-call pipeline: fetch_data -> download_data -> process_data.
+
+        This is the unified entry point shared by every hub. All keyword args are
+        forwarded to ``fetch_data`` (each provider's query params differ). Hubs
+        with a non-standard flow override this:
+          - GEMSHub: streaming download->grid->delete (server-side area extract).
+          - ERA5Hub: fetch stores the query internally, download() takes no
+            products, and process_data needs ``stations``.
+
+        Returns whatever ``fetch_data`` returned (product list), for inspection.
+        """
+        products = self.fetch_data(**kwargs)
+        if not products:
+            self.logger.warning("No products fetched — nothing to download or process.")
+            return products
+        self.download_data(products)
+        self.process_data()
+        return products
+
     def plot(self):
         """Plot data"""
         pass

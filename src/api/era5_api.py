@@ -618,6 +618,20 @@ class ERA5Hub(SatelliteHub):
             self.logger.error(f"Error saving CSV: {str(e)}")
             return None
 
+    def run_pipeline(self, start_date, end_date, boundary, variables=None,
+                     pressure_levels=None, download_mode="monthly",
+                     stations=None, extract_surrounding=False):
+        """One-call ERA5 pipeline: fetch -> download -> process (per-station CSV).
+
+        Overrides the base because ERA5 fetch stores the query internally (no
+        product list), download() takes no products, and process_data extracts
+        each station's time series to CSV (no maps).
+        """
+        self.fetch_data(start_date, end_date, boundary, variables=variables,
+                        pressure_levels=pressure_levels, download_mode=download_mode)
+        self.download_data()
+        self.process_data(stations=stations, extract_surrounding=extract_surrounding)
+
     def process_data(self, stations=None, extract_surrounding=False):
         """
         Process ERA5 data and create CSV files
