@@ -130,6 +130,10 @@ For a pinned development environment you can still use `pip install -r requireme
 
 ## <div align="center">Usage</div>
 
+Every hub exposes a single one-call **`run_pipeline()`** that runs *fetch → download → process*.
+The three steps (`fetch_data` / `download_data` / `process_data`) remain available when you need to
+inspect or control each stage. Query parameters differ per source (forwarded to `fetch_data`).
+
 ### Sentinel-5P Example
 
 ```python
@@ -137,35 +141,16 @@ For a pinned development environment you can still use `pip install -r requireme
 from datetime import datetime
 from src.api import SENTINEL5PHub
 
-# 1. Set parameters
-start_date, end_date = datetime(2025, 3, 1), datetime(2025, 3, 13)
-
-# File class: 'NRTI' (Near Real-Time) or 'OFFL' (Offline processed)
-file_class = 'NRTI'
-
-# Available file types: 'NO2___', 'O3____', 'CO____', 'SO2___', 'CH4___', 'CLOUD_', 'AER_AI'
-file_type = 'NO2___'
-
-# Define region boundary (min_lon, max_lon, min_lat, max_lat)
-boundary = (120, 122, 22, 25)
-
-# 2. Create data hub instance
+# file_class: 'NRTI' (Near Real-Time) or 'OFFL' (Offline processed)
+# file_type:  'NO2___', 'O3____', 'CO____', 'SO2___', 'CH4___', 'CLOUD_', 'AER_AI'
 sentinel_hub = SENTINEL5PHub(max_workers=3)
-
-# 3. Fetch data
-products = sentinel_hub.fetch_data(
-    file_class=file_class,
-    file_type=file_type,
-    start_date=start_date,
-    end_date=end_date,
-    boundary=boundary
+sentinel_hub.run_pipeline(
+    file_class='NRTI',
+    file_type='NO2___',
+    start_date=datetime(2025, 3, 1),
+    end_date=datetime(2025, 3, 13),
+    boundary=(120, 122, 22, 25),   # (min_lon, max_lon, min_lat, max_lat)
 )
-
-# 4. Download data
-sentinel_hub.download_data(products)
-
-# 5. Process data
-sentinel_hub.process_data()
 ```
 
 ### MODIS Example
@@ -175,27 +160,13 @@ sentinel_hub.process_data()
 from datetime import datetime
 from src.api import MODISHub
 
-# 1. Set parameters
-start_date, end_date = datetime(2025, 3, 1), datetime(2025, 3, 12)
-
-# Product types: 'MOD04_L2' (Terra) or 'MYD04_L2' (Aqua) Level-2 Products
-modis_product_type = "MYD04_L2"
-
-# 2. Create data hub instance
+# Product types: 'MOD04_L2' (Terra) / 'MYD04_L2' (Aqua) / 'MCD19A2' (MAIAC)
 modis_hub = MODISHub()
-
-# 3. Fetch data
-products = modis_hub.fetch_data(
-    file_type=modis_product_type,
-    start_date=start_date,
-    end_date=end_date
+modis_hub.run_pipeline(
+    file_type='MYD04_L2',
+    start_date=datetime(2025, 3, 1),
+    end_date=datetime(2025, 3, 12),
 )
-
-# 4. Download data
-modis_hub.download_data(products)
-
-# 5. Process data
-modis_hub.process_data()
 ```
 
 ### ERA5 Example
@@ -205,50 +176,29 @@ modis_hub.process_data()
 from datetime import datetime
 from src.api import ERA5Hub
 
-# 1. Set parameters
-start_date, end_date = datetime(2025, 3, 1), datetime(2025, 3, 19)
-
-# Variables to retrieve (more options available)
-variables = ['boundary_layer_height']
-
-# Pressure levels in hPa (set to None for surface data only)
-pressure_levels = None
-
-# Region boundary (min_lon, max_lon, min_lat, max_lat)
-boundary = (119, 123, 21, 26)
-
-# Define observation stations (used at the process_data step, not fetch_data)
+# Observation stations extracted to CSV (ERA5 outputs CSV, not maps)
 STATIONS = [
     {"name": "FS", "lat": 22.6294, "lon": 120.3461},  # Kaohsiung Fengshan
     {"name": "NZ", "lat": 22.7422, "lon": 120.3339},  # Kaohsiung Nanzi
     {"name": "TH", "lat": 24.1817, "lon": 120.5956},  # Taichung
-    {"name": "TP", "lat": 25.0330, "lon": 121.5654}   # Taipei
+    {"name": "TP", "lat": 25.0330, "lon": 121.5654},  # Taipei
 ]
 
-# 2. Create data hub instance
 era5_hub = ERA5Hub(timezone='Asia/Taipei')
-
-# 3. Fetch data ('all_at_once' or 'monthly')
-era5_hub.fetch_data(
-    start_date=start_date,
-    end_date=end_date,
-    boundary=boundary,
-    variables=variables,
-    pressure_levels=pressure_levels,
-    download_mode='all_at_once',
+era5_hub.run_pipeline(
+    start_date=datetime(2025, 3, 1),
+    end_date=datetime(2025, 3, 19),
+    boundary=(119, 123, 21, 26),         # (min_lon, max_lon, min_lat, max_lat)
+    variables=['boundary_layer_height'],
+    pressure_levels=None,                # None = surface data only
+    download_mode='all_at_once',         # or 'monthly'
+    stations=STATIONS,                   # required, else nothing is written to CSV
 )
-
-# 4. Download data
-era5_hub.download_data()
-
-# 5. Process data — extracts each station's time series to CSV.
-#    Pass `stations` here (not to fetch_data); without it nothing is written.
-era5_hub.process_data(stations=STATIONS)
 ```
 
 > [!NOTE]
-> Unlike Sentinel-5P and MODIS, the ERA5 pipeline does **not** render maps —
-> `process_data(stations=...)` extracts each station's values to CSV only.
+> Unlike Sentinel-5P / MODIS / GEMS, the ERA5 pipeline does **not** render maps —
+> it extracts each station's time series to CSV (pass `stations=...`).
 
 ### GEMS Example
 
@@ -256,37 +206,24 @@ era5_hub.process_data(stations=STATIONS)
 """GEMS Data Processing Example"""
 from src.api import GEMSHub
 
-# 1. Set parameters
-start_date, end_date = '2023-05-15', '2023-05-15'
-
 # Product types: 'NO2', 'O3'/'O3T', 'O3P', 'SO2', 'HCHO', 'CHOCHO',
 #                'AOD'/'AERAOD', 'AEH', 'UVI', 'CLOUD'
-product_type = 'NO2'
-
-# 2. Create data hub instance (requires GEMS_API_KEY in .env)
-gems_hub = GEMSHub()
-
-# 3. Fetch data (GEMS has one daytime scan per hour)
-products = gems_hub.fetch_data(
-    product_type=product_type,
-    start_date=start_date,
-    end_date=end_date,
-    ver=None,        # None = resolve the latest version online (e.g. NO2 v4.0.1)
-    level='L2',
+gems_hub = GEMSHub()   # requires GEMS_API_KEY in .env
+gems_hub.run_pipeline(
+    product_type='NO2',
+    start_date='2023-05-15',
+    end_date='2023-05-15',
+    ver=None,                            # None = resolve the latest version online (NO2 v4.0.1)
+    extract_bbox=(119, 123, 21, 26),     # server-side Taiwan crop: ~270 MB -> ~2-3 MB / granule
+    max_workers=3,                       # concurrent downloads
+    skip_existing=True,                  # resumable backfill
 )
-
-# 4. Download data (raw swath ~270 MB each)
-if products:
-    gems_hub.download_data(products)
-
-    # 5. Process data (QC -> interpolate to the Taiwan grid -> NetCDF + map + monthly animation)
-    gems_hub.process_data(start_date=start_date, end_date=end_date)
 ```
 
 > [!TIP]
-> For large backfills use `gems_hub.run_pipeline(...)` with `extract_bbox=(lon_min, lon_max,
-> lat_min, lat_max)` — it crops each granule server-side (~270 MB → ~2-3 MB) and streams
-> download → grid → delete per file, so disk usage stays flat.
+> GEMS `run_pipeline` streams *download → grid → delete-raw* per granule, so peak disk stays at
+> a few MB with `extract_bbox`. Pass `keep_raw=True` to retain raw swaths, or `make_figures=False`
+> to skip plotting during large backfills.
 
 ## <div align="center">Data Sources</div>
 
