@@ -276,6 +276,24 @@ class GEMSHub(SatelliteHub):
 
         return products
 
+    def _stream_response_to_file(self, response, out_path: Path, progress=None, task=None) -> int:
+        """把已開啟的串流回應寫到 out_path（先寫 .part 再 rename），回傳寫入位元組數。
+
+        download_data 與 _download_granule 共用的串流核心；Content-Type 驗證、
+        錯誤/空資料判斷仍由各呼叫端處理（屬 GEMS 專屬邏輯）。
+        """
+        tmp_path = out_path.with_suffix(out_path.suffix + '.part')
+        written = 0
+        with open(tmp_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=1 << 20):
+                if chunk:
+                    f.write(chunk)
+                    written += len(chunk)
+                    if progress is not None and task is not None:
+                        progress.update(task, advance=len(chunk))
+        tmp_path.rename(out_path)
+        return written
+
     def download_data(self, products: List[Dict], show_progress: bool = True) -> List[str]:
         """下載 GEMS 產品（逐檔串流寫入 raw_dir）。"""
         self._require_client()
@@ -327,15 +345,7 @@ class GEMSHub(SatelliteHub):
                             raise RuntimeError(f"下載失敗：{r.text[:200]}")
                         total = int(r.headers.get('Content-Length', 0))
                         task = progress.add_task(f"[cyan]{name[:40]}", total=total or None)
-                        tmp_path = output_path.with_suffix(output_path.suffix + '.part')
-                        written = 0
-                        with open(tmp_path, 'wb') as f:
-                            for chunk in r.iter_content(chunk_size=1 << 20):
-                                if chunk:
-                                    f.write(chunk)
-                                    written += len(chunk)
-                                    progress.update(task, advance=len(chunk))
-                        tmp_path.rename(output_path)
+                        written = self._stream_response_to_file(r, output_path, progress, task)
 
                     self.download_stats['success'] += 1
                     self.download_stats['actual_download_size'] += written
@@ -398,12 +408,7 @@ class GEMSHub(SatelliteHub):
                         return 'empty', None
                     self.logger.warning(f"下載非預期回應 {name}: {body[:150]}")
                     return 'error', None
-                tmp = out_path.with_suffix(out_path.suffix + '.part')
-                with open(tmp, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=1 << 20):
-                        if chunk:
-                            f.write(chunk)
-                tmp.rename(out_path)
+                self._stream_response_to_file(r, out_path)
             return 'ok', out_path
         except Exception as e:
             self.logger.error(f"下載失敗 {name}: {e}")

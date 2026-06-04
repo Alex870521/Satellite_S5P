@@ -324,13 +324,13 @@ class SentinelHubBase(SatelliteHub):
                 with stats_lock:
                     if download_success:
                         self.download_stats['success'] += 1
+                        self.download_stats['actual_download_size'] += file_size
                         self.logger.info(f"Successfully downloaded: {file_name}")
                     else:
                         self.download_stats['failed'] += 1
                         self.logger.error(f"Failed to download: {file_name}")
                         if output_path.exists():
                             output_path.unlink()
-                    self.download_stats['actual_download_size'] += file_size
 
             except Exception as e:
                 self.logger.error(f"Error downloading {file_name}: {str(e)}")
