@@ -38,6 +38,11 @@ FIGURE_BOUNDARY = (119, 123, 21, 26)  # (100, 145, 0, 45)
 # 在使用pipeline下，超過這個天數的檔案將被自動清理
 DATA_RETENTION_DAYS = 30  # 預設保留30天
 
+# 繪圖 DPI 設定（單一真相 / 集中管理出圖解析度）
+# 各繪圖模組以 rcParams 套用這兩個值，不再於 plt.figure / savefig 個別硬寫 dpi。
+FIGURE_DPI = 300  # 建立 figure（畫布）時的解析度
+SAVE_DPI = 600    # savefig 輸出檔的解析度
+
 # ERA5 相關配置
 ERA5_STATIONS = [
     {"name": "FS", "lat": 22.6294, "lon": 120.3461},  # Kaohsiung Fengshan

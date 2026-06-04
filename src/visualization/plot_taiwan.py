@@ -6,8 +6,10 @@ from pathlib import Path
 from shapely.ops import unary_union
 from cartopy.feature import ShapelyFeature
 
+from src.config.settings import FIGURE_DPI
 
-def plot_taiwan_map(map_scale='Taiwan', fig=None, ax=None, counties_path=None, dpi=600):
+
+def plot_taiwan_map(map_scale='Taiwan', fig=None, ax=None, counties_path=None, dpi=FIGURE_DPI):
     """
     繪製台灣地圖，使用遮罩避免海岸線與縣市邊界重疊
 

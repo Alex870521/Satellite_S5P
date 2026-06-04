@@ -11,7 +11,7 @@ from shapely.geometry import Point
 from scipy.signal import convolve2d
 from matplotlib.ticker import ScalarFormatter, FixedLocator
 
-from src.config.settings import FIGURE_BOUNDARY
+from src.config.settings import FIGURE_BOUNDARY, FIGURE_DPI, SAVE_DPI
 from src.config.richer import DisplayManager
 from src.config.catalog import PRODUCT_CONFIGS
 from src.utils.extract_datetime_from_filename import extract_datetime_from_filename
@@ -29,6 +29,10 @@ plt.rcParams['font.size'] = 16
 plt.rcParams['axes.titlesize'] = 'large'
 plt.rcParams['axes.titleweight'] = 'bold'
 plt.rcParams['axes.labelweight'] = 'bold'
+
+# 集中管理 DPI：建立 figure 與 savefig 都從 settings 取值，個別呼叫不再硬寫 dpi
+plt.rcParams['figure.dpi'] = FIGURE_DPI
+plt.rcParams['savefig.dpi'] = SAVE_DPI
 
 
 logger = logging.getLogger(__name__)
@@ -219,7 +223,7 @@ def plot_global_var(dataset: xr.Dataset | Path | str,
             DisplayManager().display_product_info(nc_info)
 
         # 創建圖形和投影
-        fig = plt.figure(figsize=(12, 8) if map_scale == 'global' else (8, 8), dpi=300)
+        fig = plt.figure(figsize=(12, 8) if map_scale == 'global' else (8, 8))
         ax = plt.axes(projection=ccrs.PlateCarree())
 
         # 使用basic_map函數創建基本地圖
@@ -242,7 +246,7 @@ def plot_global_var(dataset: xr.Dataset | Path | str,
         im = dataset.plot(
             ax=ax,
             x='longitude', y='latitude',
-            cmap='RdBu_r',
+            cmap=getattr(product_params, 'cmap', None) or 'RdBu_r',
             transform=ccrs.PlateCarree(),
             robust=True,  # 自動處理極端值
             vmin=product_params.vmin,
@@ -283,7 +287,7 @@ def plot_global_var(dataset: xr.Dataset | Path | str,
         plt.close()
 
         if savefig_path is not None:
-            fig.savefig(savefig_path, dpi=600)
+            fig.savefig(savefig_path)
 
         ds.close()
 

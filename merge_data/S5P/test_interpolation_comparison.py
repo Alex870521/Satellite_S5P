@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Tuple
 
 from src.utils.extract_datetime_from_filename import extract_datetime_from_filename
-from src.config.settings import BASE_DIR
+from src.config.settings import BASE_DIR, SAVE_DPI
 from merge_data.S5P.merge_s5p_unified import S5PProcessor
 
 
@@ -402,7 +402,7 @@ def create_comparison_plots_enhanced(gas_data_raw, interpolated_raw, gas_data_pr
         # Save plot with date-specific filename
         date_str = time_raw.strftime('%Y%m%d')
         output_path = processed_processor.output_dir / f"daily_comparison_{date_str}.png"
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.savefig(output_path, dpi=SAVE_DPI, bbox_inches='tight')
         print(f"  💾 Day {date_str} comparison plot saved: {output_path}")
         
         plt.show()
@@ -528,7 +528,7 @@ def create_all_files_comparison(raw_processor, processed_processor, raw_files, p
         
         # Save plot
         output_path = processed_processor.output_dir / f"all_files_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.savefig(output_path, dpi=SAVE_DPI, bbox_inches='tight')
         print(f"\n💾 All files comparison plot saved: {output_path}")
         
         plt.show()

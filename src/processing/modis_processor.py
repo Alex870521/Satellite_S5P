@@ -460,7 +460,7 @@ class MODISProcessor:
                         ):
         """創建 AOD 地圖"""
         try:
-            fig = plt.figure(figsize=(12, 8) if map_scale == 'global' else (8, 8), dpi=300)
+            fig = plt.figure(figsize=(12, 8) if map_scale == 'global' else (8, 8))
             ax = plt.axes(projection=ccrs.PlateCarree())
 
             ax = basic_map(ax, map_scale=map_scale, mark_stations=mark_stations)
@@ -483,7 +483,7 @@ class MODISProcessor:
 
             plt.tight_layout()
             savefig_path.parent.mkdir(parents=True, exist_ok=True)
-            plt.savefig(savefig_path, dpi=600)
+            plt.savefig(savefig_path)
             plt.close()
 
             self.logger.info(f"  已保存 AOD 地圖: {savefig_path}")

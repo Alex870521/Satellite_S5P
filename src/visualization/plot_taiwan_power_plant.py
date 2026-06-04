@@ -11,8 +11,10 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 import os
 
+from src.config.settings import FIGURE_DPI, SAVE_DPI
 
-def plot_taiwan_map(map_scale='Taiwan', fig=None, ax=None, counties_path=None, dpi=600):
+
+def plot_taiwan_map(map_scale='Taiwan', fig=None, ax=None, counties_path=None, dpi=FIGURE_DPI):
     """
     繪製台灣地圖，使用遮罩避免海岸線與縣市邊界重疊
 
@@ -204,6 +206,9 @@ def plot_stations_and_plants(env_station_file, taipower_station_file, counties_p
     # 不強制使用 serif，讓中文自動使用 sans-serif 字體
     # plt.rcParams['font.family'] = 'serif'
     plt.rcParams['font.size'] = 16
+    # 集中管理 DPI（與其他繪圖模組共用 settings 常數）
+    plt.rcParams['figure.dpi'] = FIGURE_DPI
+    plt.rcParams['savefig.dpi'] = SAVE_DPI
 
     # 讀取測站資料
     stations_df = load_station_data(env_station_file, taipower_station_file)
@@ -232,7 +237,7 @@ def plot_stations_and_plants(env_station_file, taipower_station_file, counties_p
     print(f"地圖範圍內的電廠數: {len(plants_df)}")
 
     # 創建地圖
-    fig, ax = plot_taiwan_map(map_scale='Taiwan', counties_path=counties_path, dpi=300)
+    fig, ax = plot_taiwan_map(map_scale='Taiwan', counties_path=counties_path, dpi=FIGURE_DPI)
 
     # 如果有縣市邊界資料，繪製空品區
     if counties_path is not None and Path(counties_path).exists():
@@ -429,7 +434,7 @@ def plot_stations_and_plants(env_station_file, taipower_station_file, counties_p
     plt.tight_layout()
 
     # 儲存圖片
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    plt.savefig(output_file, bbox_inches='tight')
     print(f"圖片已儲存至: {output_file}")
 
     # 顯示圖片
