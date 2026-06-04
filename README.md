@@ -264,6 +264,20 @@ era5_hub.process_data(stations=STATIONS)
 - **Resolution**: 0.25° x 0.25° global grid (about 31 km)
 - **Frequency**: Hourly data, monthly updates
 
+### GEMS
+- **Provider**: NIER Environmental Satellite Center (NESC), Korea — GK-2B geostationary
+- **Frequency**: hourly, **daytime only**, over East/South-East Asia (up to ~10 scans/day)
+- **Auth**: set `GEMS_API_KEY` in `.env` (request a key at [nesc.nier.go.kr](https://nesc.nier.go.kr))
+
+| Level | Products | Spatial resolution | Coverage (UTC) |
+|-------|----------|--------------------|----------------|
+| **L2** (swath) | NO₂, O₃ (O3T), SO₂, HCHO, CHOCHO, Aerosol (AOD/AEH), UVI, Cloud | **3.5 km × 8 km** (N–S × E–W) at Seoul; ≈ 2.8 × 7.1 km measured over Taiwan. CHOCHO is co-added (coarser) | trace gases since **~2020-09**, ongoing |
+| **L3** (gridded) | NO₂ daily / monthly mean — column & tropospheric (whole domain / KR / EA) | **~5 km over Korea, ~10 km elsewhere** | since **~2020-09**, ongoing |
+| **L4** (surface) | Surface PM₂.₅, PM₁₀, NO₂ | gridded surface product | since **~2021-12**, ongoing |
+
+> Native L2 pixel size grows toward the scan edges. This toolkit re-grids L2 swaths onto a regular
+> grid (default **8 km × 3.5 km**, set per-product in `GEMSProcessor`) before plotting/export.
+
 ## <div align="center">Processing Pipeline</div>
 
 All data sources follow a consistent workflow:
@@ -277,6 +291,43 @@ All data sources follow a consistent workflow:
    - ERA5: Extraction of point values for weather stations
 5. **Visualization**: Generation of standardized maps and plots
 6. **Export**: Structured data storage in NetCDF and CSV formats
+
+## <div align="center">Storage Layout</div>
+
+All downloads and outputs live under a single **base directory**, configured once via the
+`SATELLITE_BASE_DIR` environment variable in `.env` (falls back to `/Volumes/Transcend` if unset).
+Every satellite hub then builds the same `{base}/{Satellite}/{raw|processed|figure}/...` tree.
+
+Anatomy of a downloaded file path (GEMS NO₂ example):
+
+```
+$SATELLITE_BASE_DIR / GEMS / raw /  NO2  / 2023/05 / GK2_GEMS_L2_..._NO2_..._.nc
+└───── ① base ─────┘  └─②─┘ └─③─┘ └─④─┘ └──⑤──┘  └──────────── ⑥ ───────────┘
+```
+
+| # | Segment | Value (example) | Where it is set |
+|---|---------|-----------------|-----------------|
+| ① | **base dir** | `…/DataCenter/Satellite` | `.env` → `SATELLITE_BASE_DIR` (read by `src/config/settings.py` → `BASE_DIR`) |
+| ② | **satellite** | `GEMS` | each hub's `name` attribute → `core.py` `main_dir = base_dir / name` |
+| ③ | **stage** | `raw` (also `processed`, `figure`, `logs`) | `core.py` `_setup_common_dirs()` |
+| ④ | **product** | `NO2` | hub download step (e.g. `gems_api.py`) |
+| ⑤ | **year/month** | `2023/05` | derived from each file's timestamp |
+| ⑥ | **filename** | original granule name | from the data provider |
+
+Resulting tree:
+
+```
+$SATELLITE_BASE_DIR/
+├── Sentinel-5P/ { raw, processed, figure, geotiff, logs }/<product>/<YYYY>/<MM>/
+├── MODIS/       { raw, processed, figure, logs }/<product>/<YYYY>/<MM>/
+├── ERA5/        { raw, processed, figure, logs }/...
+└── GEMS/        { raw, processed, figure, logs }/<product>/<YYYY>/<MM>/
+    ├── raw/       NO2/2023/05/GK2_GEMS_L2_20230515_0345_NO2_..._.nc   ← downloaded swath
+    ├── processed/ NO2/2023/05/GK2_GEMS_L2_20230515_0345_NO2_..._.nc   ← gridded NetCDF
+    └── figure/    NO2/2023/05/GK2_GEMS_L2_20230515_0345_NO2_..._.png   ← map + monthly .gif
+```
+
+> **To relocate all data**, change only `SATELLITE_BASE_DIR` in `.env` — no code changes needed.
 
 ## <div align="center">Automatic Data Management</div>
 

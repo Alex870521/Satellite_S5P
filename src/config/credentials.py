@@ -85,8 +85,8 @@ class CredentialValidator:
 
     OPTIONAL_CREDENTIALS = {
         'gems': {
-            'env_vars': ['GEMS_USERNAME', 'GEMS_PASSWORD'],
-            'description': 'GEMS',
+            'env_vars': ['GEMS_API_KEY'],
+            'description': 'GEMS (NIER/NESC Open-API)',
         },
         'himawari': {
             'env_vars': ['HIMAWARI_USERNAME', 'HIMAWARI_PASSWORD'],

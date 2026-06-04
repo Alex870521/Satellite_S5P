@@ -29,7 +29,9 @@ def extract_datetime_from_filename(filename, to_local=True, local_tz='Asia/Taipe
 
 
     # MODIS 格式解析
-    elif not date_obj:
+    # 注意：以下各格式為「獨立的 if date_obj is None」而非 elif —— elif 會在進入
+    # MODIS 分支（即使沒匹配到）後，讓後面所有格式變成死碼，導致非 S5P/MODIS 檔回 None。
+    if date_obj is None:
         # 匹配兩種主要的 MODIS 格式
         # 格式1: MOD04_L2.A2025001.0210.061.2025001180158.hdf (包含時間)
         # 格式2: MCD19A2.A2025001.h29v06.061.2025003055754.hdf (不包含時間)
@@ -59,29 +61,35 @@ def extract_datetime_from_filename(filename, to_local=True, local_tz='Asia/Taipe
                 # 沒有時間信息時，設為當天午夜
                 date_obj = datetime(year, 1, 1) + timedelta(days=day_of_year - 1)
 
+    # GEMS 格式 GK2_GEMS_L2_20230515_0345_NO2_... (日期_時分)，須在通用 YYYYMMDD 之前
+    if date_obj is None:
+        gems_match = re.search(r'_(\d{8})_(\d{4})_', filename)
+        if gems_match:
+            date_obj = datetime.strptime(gems_match.group(1) + gems_match.group(2), '%Y%m%d%H%M')
+
     # YYYYMMDD 格式
-    elif not date_obj:
+    if date_obj is None:
         yyyymmdd_match = re.search(r'(\d{8})', filename)
         if yyyymmdd_match:
             date_str = yyyymmdd_match.group(1)
             date_obj = datetime.strptime(date_str, '%Y%m%d')
 
     # YYYYMMDD_HHMMSS 格式
-    elif not date_obj:
+    if date_obj is None:
         yyyymmdd_hhmmss_match = re.search(r'(\d{8}_\d{6})', filename)
         if yyyymmdd_hhmmss_match:
             date_str = yyyymmdd_hhmmss_match.group(1)
             date_obj = datetime.strptime(date_str, '%Y%m%d_%H%M%S')
 
     # ISO 日期格式 YYYY-MM-DD
-    elif not date_obj:
+    if date_obj is None:
         iso_date_match = re.search(r'(\d{4}-\d{2}-\d{2})', filename)
         if iso_date_match:
             date_str = iso_date_match.group(1)
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
 
     # ISO 日期時間格式 YYYY-MM-DDThh:mm:ss
-    elif not date_obj:
+    if date_obj is None:
         iso_datetime_match = re.search(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', filename)
         if iso_datetime_match:
             date_str = iso_datetime_match.group(1)
