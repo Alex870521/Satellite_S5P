@@ -8,12 +8,54 @@ from rich.prompt import Confirm
 from rich.panel import Panel
 from rich.table import Table
 from rich.align import Align
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    DownloadColumn,
+    TransferSpeedColumn,
+    TimeRemainingColumn,
+)
 
 
 # 定義常數
 PANEL_WIDTH = 120
 
-console = Console(force_terminal=True, color_system="auto", width=PANEL_WIDTH)  # 使用您想要的寬度
+console = Console(force_terminal=True, color_system="auto", width=PANEL_WIDTH)  # 固定寬度，給靜態面板用
+
+# 進度條專用 console：自動偵測真實終端機寬度與是否為 TTY。
+# 不可沿用上面固定 width=120 的 console——若實際終端機比 120 窄，Live/Progress
+# 的每一行會被終端機折成多行，rich 以為一行、游標上移行數算錯，導致進度條無法
+# 原地覆寫、不斷往下印（rich 已知問題）。非 TTY（被 `!`/管線捕捉）時 rich 會自動
+# 關閉動畫，輸出也更乾淨。
+progress_console = Console()
+
+
+def make_download_progress(disable: bool = False, transient: bool = False) -> Progress:
+    """單檔串流下載用的標準進度條（共用工廠）。
+
+    欄位：Spinner｜描述｜進度條｜已下載/總量｜傳輸速度｜剩餘時間，
+    全部使用 rich 內建欄位，不自刻 byte→MB 換算。
+
+    Parameters
+    ----------
+    disable : bool
+        True 時完全停用顯示（對應呼叫端的 not show_progress）。
+    transient : bool
+        True 時完成後自動清除進度條。
+    """
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=progress_console,
+        disable=disable,
+        transient=transient,
+    )
 
 
 def rich_print(message: str | Table,
@@ -58,8 +100,10 @@ def rich_print(message: str | Table,
 
 class DisplayManager:
     def __init__(self):
-        self.console = console
-        self.panel_width = PANEL_WIDTH
+        # 用會自動偵測終端機寬度的 console；面板寬度上限 = min(120, 實際終端寬度)，
+        # 寬終端機維持原本 120 置中外觀，窄終端機自動縮到合適寬度、不再折行溢出。
+        self.console = progress_console
+        self.panel_width = min(PANEL_WIDTH, progress_console.width)
         self.panel_style = "bright_blue"
         self.panel_padding = (1, 0)
 
@@ -167,7 +211,7 @@ class DisplayManager:
 
     def display_download_summary(self, stats):
         """顯示下載統計摘要"""
-        table = Table(title="Download Summary", width=60, padding=(0, 1), expand=False)
+        table = Table(title="Download Summary", width=min(60, self.panel_width - 4), padding=(0, 1), expand=False)
         table.add_column("Metric", style="cyan")
         table.add_column("Value", justify="right", style="green")
 
@@ -201,7 +245,7 @@ class DisplayManager:
 
     def display_product_info(self, nc_info):
         """顯示下載統計摘要"""
-        table = Table(title="Information", width=40, padding=(0, 1), expand=False)
+        table = Table(title="Information", width=min(40, self.panel_width - 4), padding=(0, 1), expand=False)
         table.add_column("Metric", style="cyan")
         table.add_column("Value", justify="right", style="green")
 

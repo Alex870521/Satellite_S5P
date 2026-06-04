@@ -5,16 +5,9 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal, Optional, List, Dict, Any, Tuple
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    BarColumn,
-    TimeRemainingColumn,
-)
 
 from src.api.core import SatelliteHub
-from src.config.richer import console, DisplayManager
+from src.config.richer import DisplayManager
 
 
 class HimawariHub(SatelliteHub):

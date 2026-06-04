@@ -3,8 +3,9 @@ import time
 import aiohttp  # 異步操作
 import requests
 import zipfile
+import queue
 import threading
-import multiprocessing
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -24,7 +25,7 @@ from src.config.settings import (
     COPERNICUS_DOWNLOAD_URL,
     DEFAULT_TIMEOUT
 )
-from src.config.richer import console, DisplayManager
+from src.config.richer import progress_console, DisplayManager
 from src.config.catalog import ClassInput, TypeInput, PRODUCT_CONFIGS
 from src.api.core import SatelliteHub
 from src.processing import SentinelProcessor
@@ -33,16 +34,18 @@ from sentinelsat import SentinelAPI
 
 class FileProgressColumn(ProgressColumn):
     def render(self, task):
-        """渲染進度列顯示"""
+        """渲染進度列：主進度條顯示已完成產品數，檔案進度條顯示 MB。
+
+        以 task.fields['kind'] 區分主/子進度條，不再用描述字串嗅探。
+        """
+        if task.fields.get("kind") == "overall":
+            return f"{int(task.completed)} / {int(task.total)} products"
+
         if task.total is None:
             return ""
 
-        # 如果是主進度條
-        if "Overall Progress" in task.description:
-            return f"{task.completed} / {task.total} products"
-
-        # 如果是檔案下載進度條
-        completed = task.completed / (1024 * 1024)  # 轉換為 MB
+        # 檔案下載進度條：bytes → MB
+        completed = task.completed / (1024 * 1024)
         total = task.total / (1024 * 1024)
         return f"{completed:5.1f} / {total:5.1f} MB"
 
@@ -154,10 +157,10 @@ class SentinelHubBase(SatelliteHub):
                 with Progress(
                         SpinnerColumn(),
                         TextColumn("[bold blue]{task.description}"),
-                        BarColumn(bar_width=106),
+                        BarColumn(),  # 自適應寬度，避免寫死寬度在窄終端機折行
                         FileProgressColumn(),
                         TimeRemainingColumn(),
-                        console=console,
+                        console=progress_console,
                         transient=True,
                         expand=True
                 ) as progress:
@@ -216,26 +219,20 @@ class SentinelHubBase(SatelliteHub):
             raise
 
     def download_data(self, products: list, show_progress=False):
-        """
-        並行下載多個產品
+        """並行下載多個產品（ThreadPoolExecutor）。
 
         Parameters:
             products (list): 要下載的產品列表
-            show_progress (bool): 是否顯示進度條，默認為True
+            show_progress (bool): 是否顯示 rich 進度條。預設 False（headless/
+                automation 走日誌輸出，避免把進度條灌進 pipeline log）。
+
+        進度顯示維持固定 max_workers 條 worker 列、原地刷新：每個正在執行的
+        download_one 從 slot_pool 借一條列，完成後歸還，不新增/移除任何列
+        （避免 live 區域高度變動導致畫面往下捲）。
         """
         if not products:
             self.logger.warning("No products to download")
             return
-
-        # 使用 Queue 來管理下載任務
-        import queue
-        task_queue = queue.Queue()
-        for product in products:
-            task_queue.put(product)
-
-        # 創建進度追蹤器
-        completed_files = multiprocessing.Value('i', 0)
-        active_threads = multiprocessing.Value('i', 0)
 
         # 初始化下載統計
         self.download_stats.update({
@@ -247,239 +244,162 @@ class SentinelHubBase(SatelliteHub):
             'start_time': time.time()
         })
 
-        # 創建統計資料的鎖
-        progress_lock = threading.Lock()
         stats_lock = threading.Lock()
 
-        def download_files(progress, task_id, thread_index, completed_files, task_queue):
+        def download_one(product, progress, slot_pool, sub_tasks):
+            """下載單一產品。stats 更新自帶鎖；progress=None 時走日誌。"""
+            file_size = product.get('ContentLength', 0)
+            file_name = product.get('Name')
+
+            # 借一條固定的 worker 進度列（原地刷新，跑完歸還）
+            slot = task_id = None
+            if progress is not None:
+                slot = slot_pool.get()
+                task_id = sub_tasks[slot]
+                progress.update(
+                    task_id,
+                    description=f"[cyan]Thread {slot + 1}: {file_name[:28]}...{file_name[-9:]}",
+                    total=file_size or None,
+                    completed=0,
+                )
+            else:
+                self.logger.info(f"Downloading {file_name}")
+
+            output_path = None
             try:
-                with active_threads.get_lock():
-                    active_threads.value += 1
+                # 取得認證 token
+                with self._token_lock:
+                    token = self.auth.ensure_valid_token()
+                    headers = {'Authorization': f'Bearer {token}'}
 
-                while True:
-                    try:
-                        # 非阻塞方式取得任務
-                        product = task_queue.get_nowait()
-                    except queue.Empty:
-                        break
+                product_type = self.file_type
+                start_time = product.get('ContentDate', {}).get('Start')
+                date_obj = datetime.strptime(start_time, '%Y-%m-%dT%H:%M:%S.%fZ')
+                output_dir = self.raw_dir / product_type / date_obj.strftime('%Y') / date_obj.strftime('%m')
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = output_dir / file_name
 
-                    file_size = product.get('ContentLength', 0)
-                    file_name = product.get('Name')
-
-                    # 更新進度條顯示當前任務 (如果啟用進度條)
-                    if show_progress and progress:
-                        with progress_lock:
-                            progress.update(
-                                task_id,
-                                description=f"[cyan]Thread {thread_index + 1}: {file_name[:28]}...{file_name[-9:]}",
-                                total=file_size,
-                                completed=0,
-                                visible=True,
-                                refresh=True
-                            )
+                # 檔案已存在（已解壓的 .nc，非 zip）→ 跳過
+                if output_path.exists() and not zipfile.is_zipfile(output_path):
+                    if progress is not None:
+                        progress.update(task_id, total=file_size or 1, completed=file_size or 1)
                     else:
-                        # 不使用進度條時，使用日誌記錄進度
-                        self.logger.info(f"Thread {thread_index + 1}: Downloading {file_name}")
+                        self.logger.info(f"File already exists, skipping: {file_name}")
+                    with stats_lock:
+                        self.download_stats['skipped'] += 1
+                    return
 
-                    success = False  # 用於追蹤是否需要呼叫 task_done()
+                product_id = product.get('Id')
+                download_url = f"{COPERNICUS_DOWNLOAD_URL}({product_id})/$value"
+
+                def update_progress(downloaded_bytes):
+                    if progress is not None:
+                        progress.update(task_id, completed=min(downloaded_bytes, file_size))
+
+                # 執行下載（最多重試 3 次，失敗間隔 5s 並刷新 token）
+                download_success = False
+                for attempt in range(3):
                     try:
-                        # 取得認證 token
-                        with self._token_lock:
-                            token = self.auth.ensure_valid_token()
-                            headers = {'Authorization': f'Bearer {token}'}
+                        if self.downloader.download_data(
+                                download_url,
+                                headers,
+                                output_path,
+                                progress_callback=update_progress if progress is not None else None
+                        ):
+                            download_success = True
+                            break
 
-                        product_type = self.file_type
-                        start_time = product.get('ContentDate', {}).get('Start')
-                        date_obj = datetime.strptime(start_time, '%Y-%m-%dT%H:%M:%S.%fZ')
-                        output_dir = self.raw_dir / product_type / date_obj.strftime('%Y') / date_obj.strftime('%m')
-                        output_dir.mkdir(parents=True, exist_ok=True)
-
-                        output_path = output_dir / file_name
-
-                        # 檢查檔案是否已存在
-                        if output_path.exists() and not zipfile.is_zipfile(output_path):
-                            if show_progress and progress:
-                                with progress_lock:
-                                    progress.update(task_id, completed=file_size)
-                            else:
-                                self.logger.info(f"File already exists, skipping: {file_name}")
-
-                            with stats_lock:
-                                self.download_stats['skipped'] += 1
-                            with completed_files.get_lock():
-                                completed_files.value += 1
-                            success = True
-                            task_queue.task_done()
-                            continue
-
-                        product_id = product.get('Id')
-                        download_url = f"{COPERNICUS_DOWNLOAD_URL}({product_id})/$value"
-
-                        def update_progress(downloaded_bytes):
-                            current_progress = min(downloaded_bytes, file_size)
-                            if show_progress and progress:
-                                with progress_lock:
-                                    progress.update(task_id, completed=current_progress, refresh=True)
-                            # 不使用進度條時，可以定期輸出日誌 (可選，這可能產生大量日誌)
-                            # else:
-                            #     if downloaded_bytes % (file_size // 10) < (file_size // 100):  # 每10%記錄一次
-                            #         percent = int(downloaded_bytes / file_size * 100)
-                            #         self.logger.info(f"Download progress for {file_name}: {percent}%")
-
-                        # 執行下載
-                        download_success = False
-                        for attempt in range(3):
-                            try:
-                                if self.downloader.download_data(
-                                        download_url,
-                                        headers,
-                                        output_path,
-                                        progress_callback=update_progress if show_progress else None
-                                ):
-                                    download_success = True
-                                    break
-
-                                if not download_success and attempt < 2:
-                                    time.sleep(5)
-                                    with self._token_lock:
-                                        token = self.auth.ensure_valid_token()
-                                        headers = {'Authorization': f'Bearer {token}'}
-
-                            except Exception as e:
-                                self.logger.error(f"Download attempt {attempt + 1} failed for {file_name}: {str(e)}")
-                                if attempt < 2:
-                                    time.sleep(5)
-                                continue
-
-                        # 更新下載結果
-                        with stats_lock:
-                            if download_success:
-                                self.download_stats['success'] += 1
-                                self.logger.info(f"Successfully downloaded: {file_name}")
-                            else:
-                                self.download_stats['failed'] += 1
-                                self.logger.error(f"Failed to download: {file_name}")
-                                if output_path.exists():
-                                    output_path.unlink()
-
-                        success = True
-                        with stats_lock:
-                            self.download_stats['actual_download_size'] += file_size
-                        with completed_files.get_lock():
-                            completed_files.value += 1
+                        if attempt < 2:
+                            time.sleep(5)
+                            with self._token_lock:
+                                token = self.auth.ensure_valid_token()
+                                headers = {'Authorization': f'Bearer {token}'}
 
                     except Exception as e:
-                        self.logger.error(f"Error downloading {file_name}: {str(e)}")
-                        with stats_lock:
-                            self.download_stats['failed'] += 1
-                        with completed_files.get_lock():
-                            completed_files.value += 1
+                        self.logger.error(f"Download attempt {attempt + 1} failed for {file_name}: {str(e)}")
+                        if attempt < 2:
+                            time.sleep(5)
+                        continue
 
-                        if 'output_path' in locals() and output_path.exists():
+                with stats_lock:
+                    if download_success:
+                        self.download_stats['success'] += 1
+                        self.logger.info(f"Successfully downloaded: {file_name}")
+                    else:
+                        self.download_stats['failed'] += 1
+                        self.logger.error(f"Failed to download: {file_name}")
+                        if output_path.exists():
                             output_path.unlink()
-                    finally:
-                        if show_progress and progress:
-                            with progress_lock:
-                                progress.update(task_id, visible=False, refresh=True)
-                        if not success:
-                            task_queue.task_done()
+                    self.download_stats['actual_download_size'] += file_size
 
+            except Exception as e:
+                self.logger.error(f"Error downloading {file_name}: {str(e)}")
+                with stats_lock:
+                    self.download_stats['failed'] += 1
+                if output_path is not None and output_path.exists():
+                    output_path.unlink()
             finally:
-                with active_threads.get_lock():
-                    active_threads.value -= 1
-                if show_progress and progress:
-                    with progress_lock:
-                        progress.update(task_id, visible=False, refresh=True)
+                # 歸還 worker 列：重設為等待狀態，留在原位（不移除）
+                if progress is not None:
+                    progress.update(
+                        task_id,
+                        description=f"[cyan]Thread {slot + 1}: Waiting for download...",
+                        total=1,
+                        completed=0,
+                    )
+                    slot_pool.put(slot)
 
-        # 根據是否顯示進度條執行不同的下載方式
-        if show_progress:
-            # 使用 rich 庫的進度條
+        # 只有「要求進度條」且「真的是互動終端機」時才畫 thread 進度條；
+        # 非互動（被 `!`/管線/重導向捕捉、cron）時自動退回逐檔文字狀態（走 logger，
+        # 看得到下載狀況），不顯示 thread bars——避免在非 TTY 折行洗版。
+        use_bars = show_progress and progress_console.is_terminal
+
+        if use_bars:
             with Progress(
                     SpinnerColumn(),
                     TextColumn("[bold blue]{task.description}"),
                     BarColumn(complete_style="green"),
                     FileProgressColumn(),
                     TimeRemainingColumn(),
-                    console=console,
+                    console=progress_console,
                     expand=False,
                     transient=False
             ) as progress:
-                # 創建主進度條
-                main_task = progress.add_task("[green]Overall Progress", total=len(products))
+                overall = progress.add_task("[green]Overall Progress", total=len(products), kind="overall")
 
-                # 創建執行緒的進度條
-                sub_tasks = []
+                # 固定 max_workers 條 worker 列 + 對應的 slot 池
+                sub_tasks = [
+                    progress.add_task(f"[cyan]Thread {i + 1}: Waiting for download...", total=1, completed=0)
+                    for i in range(self.max_workers)
+                ]
+                slot_pool = queue.Queue()
                 for i in range(self.max_workers):
-                    task_id = progress.add_task(
-                        f"[cyan]Thread {i + 1}: Waiting for download...",
-                        total=100,
-                        visible=True
-                    )
-                    sub_tasks.append(task_id)
+                    slot_pool.put(i)
 
-                # 啟動下載執行緒
-                threads = []
-                for i, task_id in enumerate(sub_tasks):
-                    thread = threading.Thread(
-                        target=download_files,
-                        args=(progress, task_id, i, completed_files, task_queue)
-                    )
-                    thread.daemon = True
-                    threads.append(thread)
-                    thread.start()
-                    time.sleep(1)
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    futures = [executor.submit(download_one, p, progress, slot_pool, sub_tasks) for p in products]
+                    for _ in as_completed(futures):
+                        progress.advance(overall)
 
-                # 監控進度
-                while True:
-                    current_completed = completed_files.value
-                    progress.update(main_task, completed=current_completed)
-
-                    if (task_queue.empty() and
-                            current_completed >= len(products) and
-                            active_threads.value == 0):
-                        break
-
-                    time.sleep(0.1)
-
-                # 確保所有進度條都被清理
                 for task_id in sub_tasks:
                     progress.update(task_id, visible=False)
 
-                # 顯示下載統計
                 DisplayManager().display_download_summary(self.download_stats)
         else:
-            # 不使用進度條，簡單的日誌輸出
             self.logger.info(f"Starting download of {len(products)} files...")
+            completed = 0
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = [executor.submit(download_one, p, None, None, None) for p in products]
+                for _ in as_completed(futures):
+                    completed += 1
+                    self.logger.info(f"Overall progress: {completed}/{len(products)} files completed")
 
-            # 啟動下載執行緒
-            threads = []
-            for i in range(self.max_workers):
-                thread = threading.Thread(
-                    target=download_files,
-                    args=(None, None, i, completed_files, task_queue)
-                )
-                thread.daemon = True
-                threads.append(thread)
-                thread.start()
-
-            # 等待下載完成
-            total_files = len(products)
-            while True:
-                current_completed = completed_files.value
-                if task_queue.empty() and current_completed >= total_files and active_threads.value == 0:
-                    break
-
-                # 定期輸出總體進度
-                self.logger.info(f"Overall progress: {current_completed}/{total_files} files completed")
-                time.sleep(5)  # 每5秒輸出一次總體進度
-
-            # 顯示下載統計摘要
             self.logger.info(f"Download completed: {self.download_stats['success']} successful, "
                              f"{self.download_stats['failed']} failed, {self.download_stats['skipped']} skipped")
 
-            # 如果有顯示管理器，也顯示完整統計
-            if hasattr(self, 'display_manager'):
-                self.display_manager.display_download_summary(self.download_stats)
+            # 非互動也顯示統計面板（已自適應寬度，會以純文字輸出）
+            DisplayManager().display_download_summary(self.download_stats)
+
 
     @property
     def processor(self):
