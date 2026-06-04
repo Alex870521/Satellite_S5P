@@ -11,7 +11,7 @@
 
 ---
 
-A comprehensive Python toolkit for retrieving, processing, and visualizing satellite data from multiple sources: Sentinel-5P, MODIS, and ERA5. This toolkit focuses on atmospheric data including air pollutants (NO₂, CO, SO₂, O₃, HCHO), aerosol optical depth, and meteorological parameters.
+A comprehensive Python toolkit for retrieving, processing, and visualizing satellite data from multiple sources: Sentinel-5P, MODIS, ERA5, and GEMS. This toolkit focuses on atmospheric data including air pollutants (NO₂, CO, SO₂, O₃, HCHO), aerosol optical depth, and meteorological parameters.
 
 ## <div align="center">Features</div>
 
@@ -19,9 +19,10 @@ A comprehensive Python toolkit for retrieving, processing, and visualizing satel
   - **Sentinel-5P**: Trace gases and air pollutants
   - **MODIS**: Aerosol optical depth (AOD) measurements
   - **ERA5**: Reanalysis of atmospheric, land, and oceanic climate variables
+  - **GEMS**: Geostationary hourly trace gases & aerosol over East Asia (daytime)
 
 - **Unified Data Access**:
-  - Automated data retrieval from Copernicus Open Access Hub, NASA Earthdata, and Climate Data Store
+  - Automated data retrieval from Copernicus Open Access Hub, NASA Earthdata, Climate Data Store, and the NIER/NESC GEMS Open-API
   - Consistent API across different data sources
 
 - **Advanced Processing**:
@@ -50,7 +51,10 @@ Before using this toolkit, you need to complete the following steps:
 2. **NASA Earthdata Account** (for MODIS):
    - Register at [NASA Earthdata](https://urs.earthdata.nasa.gov/)
 
-3. **Environment Configuration**:
+3. **GEMS Open-API Key** (for GEMS):
+   - Request a key at [NIER/NESC](https://nesc.nier.go.kr) and use the "single key" mode
+
+4. **Environment Configuration**:
    - Create a `.env` file in the project root directory with your credentials:
      ```
      # Sentinel-5P credentials
@@ -64,6 +68,9 @@ Before using this toolkit, you need to complete the following steps:
      # NASA Earthdata credentials
      EARTHDATA_USERNAME=your_username
      EARTHDATA_PASSWORD=your_password
+
+     # GEMS credentials (request a key at https://nesc.nier.go.kr)
+     GEMS_API_KEY=your_key
 
      # Where downloads/outputs are stored. REQUIRED unless the default
      # external drive (/Volumes/Transcend) is mounted — otherwise creating a
@@ -243,26 +250,87 @@ era5_hub.process_data(stations=STATIONS)
 > Unlike Sentinel-5P and MODIS, the ERA5 pipeline does **not** render maps —
 > `process_data(stations=...)` extracts each station's values to CSV only.
 
+### GEMS Example
+
+```python
+"""GEMS Data Processing Example"""
+from src.api import GEMSHub
+
+# 1. Set parameters
+start_date, end_date = '2023-05-15', '2023-05-15'
+
+# Product types: 'NO2', 'O3'/'O3T', 'O3P', 'SO2', 'HCHO', 'CHOCHO',
+#                'AOD'/'AERAOD', 'AEH', 'UVI', 'CLOUD'
+product_type = 'NO2'
+
+# 2. Create data hub instance (requires GEMS_API_KEY in .env)
+gems_hub = GEMSHub()
+
+# 3. Fetch data (GEMS has one daytime scan per hour)
+products = gems_hub.fetch_data(
+    product_type=product_type,
+    start_date=start_date,
+    end_date=end_date,
+    ver=None,        # None = resolve the latest version online (e.g. NO2 v4.0.1)
+    level='L2',
+)
+
+# 4. Download data (raw swath ~270 MB each)
+if products:
+    gems_hub.download_data(products)
+
+    # 5. Process data (QC -> interpolate to the Taiwan grid -> NetCDF + map + monthly animation)
+    gems_hub.process_data(start_date=start_date, end_date=end_date)
+```
+
+> [!TIP]
+> For large backfills use `gems_hub.run_pipeline(...)` with `extract_bbox=(lon_min, lon_max,
+> lat_min, lat_max)` — it crops each granule server-side (~270 MB → ~2-3 MB) and streams
+> download → grid → delete per file, so disk usage stays flat.
+
 ## <div align="center">Data Sources</div>
 
 ### Sentinel-5P
-- **Provider**: European Space Agency (ESA)
-- **Products**: NO₂, O₃, CO, SO₂, HCHO, Cloud, Aerosol Index
-- **Resolution**: 7 km x 3.5 km (at nadir)
-- **Frequency**: Daily global coverage
+- **Provider**: European Space Agency (ESA) — Copernicus / TROPOMI
+- **Frequency**: daily global coverage; processing classes `NRTI` / `OFFL` / `RPRO`
+- **Auth**: `COPERNICUS_USERNAME` / `COPERNICUS_PASSWORD` (Copernicus Data Space)
+
+| Product | `file_type` | Resolution (km) | Quantity |
+|---------|-------------|-----------------|----------|
+| NO₂ | `NO2___` | 5.5 × 3.5 | Tropospheric column |
+| O₃ | `O3____` | 5.5 × 3.5 | Total vertical column |
+| O₃ profile | `O3__PR` | 30 × 30 | Vertical profile |
+| SO₂ | `SO2___` | 5.5 × 3.5 | Total vertical column |
+| HCHO | `HCHO__` | 5.5 × 3.5 | Tropospheric vertical column |
+| CO | `CO____` | 5.5 × 7 | Total column |
+| CH₄ | `CH4___` | 5.5 × 7 | Column-averaged mixing ratio |
+| Aerosol Index | `AER_AI` | 5.5 × 3.5 | UV aerosol index |
+| Cloud | `CLOUD_` | 5.5 × 3.5 | Cloud fraction / properties |
+
+> Nadir resolution is 5.5 × 3.5 km since 2019-08-06 (7 × 3.5 km before).
 
 ### MODIS
-- **Provider**: NASA
-- **Products**: Aerosol Optical Depth (AOD)
-- **Platforms**: Terra (MOD04) and Aqua (MYD04) satellites
-- **Resolution**: 10 km at nadir
-- **Frequency**: 1-2 days global coverage
+- **Provider**: NASA — Terra & Aqua (Dark Target) / combined (MAIAC)
+- **Frequency**: 1–2 days global coverage
+- **Auth**: `EARTHDATA_USERNAME` / `EARTHDATA_PASSWORD` (NASA Earthdata)
+
+| Product | Platform | Algorithm (level) | Resolution |
+|---------|----------|-------------------|------------|
+| `MOD04_L2` / `MYD04_L2` | Terra / Aqua | Dark Target AOD (L2) | 10 km |
+| `MOD04_3K` / `MYD04_3K` | Terra / Aqua | Dark Target AOD (L2) | 3 km |
+| `MCD19A2` | Terra + Aqua | MAIAC AOD (L3) | 1 km |
 
 ### ERA5
 - **Provider**: European Centre for Medium-Range Weather Forecasts (ECMWF)
-- **Products**: Reanalysis dataset with 100+ atmospheric, land and oceanic parameters
-- **Resolution**: 0.25° x 0.25° global grid (about 31 km)
-- **Frequency**: Hourly data, monthly updates
+- **Frequency**: hourly, monthly updates; 0.25° × 0.25° global grid (~31 km)
+- **Auth**: `CDSAPI_URL` / `CDSAPI_KEY` (Climate Data Store)
+
+| Type | Examples | Levels |
+|------|----------|--------|
+| Single-level (surface) | boundary_layer_height, 2 m temperature, 10 m wind, mean sea-level pressure | surface |
+| Pressure-level | temperature, u/v wind, geopotential, relative humidity | 37 levels (1000–1 hPa) |
+
+> This toolkit extracts per-station time series to CSV (no maps); 100+ variables are available.
 
 ### GEMS
 - **Provider**: NIER Environmental Satellite Center (NESC), Korea — GK-2B geostationary
@@ -277,6 +345,15 @@ era5_hub.process_data(stations=STATIONS)
 
 > Native L2 pixel size grows toward the scan edges. This toolkit re-grids L2 swaths onto a regular
 > grid (default **8 km × 3.5 km**, set per-product in `GEMSProcessor`) before plotting/export.
+
+## <div align="center">Documentation</div>
+
+Per-source and topic guides live under [`docs/`](docs/):
+
+- [GEMS API](docs/GEMS_API_README.md) — products, usage, storage layout, `GEMS_API_KEY` setup
+- [Himawari API](docs/Himawari_API_README.md) — products & usage *(mock; not yet wired to a real service)*
+- [MODIS AOD variables](docs/MODIS_AOD_Variables_README.md) — AOD variable reference
+- [MODIS HDF → NetCDF merge](docs/MODIS_HDF_Merge_README.md) — raw `.hdf` ingest/merge notes
 
 ## <div align="center">Processing Pipeline</div>
 
