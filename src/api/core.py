@@ -5,15 +5,22 @@ from rich.console import Console
 from rich.logging import RichHandler
 from abc import ABC, abstractmethod
 from datetime import datetime
-from src.config.settings import BASE_DIR
+from src.config.settings import BASE_DIR, REGIONS
 
 
 class SatelliteHub(ABC):
     name = 'SatelliteHub'
 
-    def __init__(self, base_dir=BASE_DIR):
+    def __init__(self, base_dir=BASE_DIR, region='taiwan'):
         # Set up directory structure
         self.base_dir = base_dir
+        if region not in REGIONS:
+            raise ValueError(f"Unknown region '{region}'. Known: {sorted(REGIONS)}")
+        # The geographic crop region. 'taiwan' keeps the historical layout
+        # (processed/); any other region writes to processed_<region>/ and uses
+        # that region's GridFrame bounds (resolution is left untouched).
+        self.region = region
+        self.region_bounds = REGIONS[region]
         self._setup_common_dirs()
 
         # Set up logging
@@ -76,17 +83,22 @@ class SatelliteHub(ABC):
         # Create base directory with API name
         self.main_dir = self.base_dir / self.name
 
-        # Create common directories
+        # Region-specific OUTPUTS get a _<region> suffix so the Taiwan archive and
+        # wider crops coexist (web auto-detects each processed_* folder). Taiwan keeps
+        # the historical bare names. raw/ is shared — the same granules feed all regions.
+        def _r(base):
+            return base if self.region == "taiwan" else f"{base}_{self.region}"
+
         self.logs_dir = self.main_dir / "logs"
-        self.raw_dir = self.main_dir / "raw"
-        self.processed_dir = self.main_dir / "processed"
-        self.figure_dir = self.main_dir / "figure"
+        self.raw_dir = self.main_dir / "raw"   # region-independent downloads
+        self.processed_dir = self.main_dir / _r("processed")
+        self.figure_dir = self.main_dir / _r("figure")
 
         for dir_path in [self.main_dir, self.logs_dir, self.raw_dir, self.processed_dir, self.figure_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
 
         if self.name == 'Sentinel-5P':
-            self.geotiff_dir = self.main_dir / "geotiff"
+            self.geotiff_dir = self.main_dir / _r("geotiff")
             self.geotiff_dir.mkdir(parents=True, exist_ok=True)
 
     @abstractmethod

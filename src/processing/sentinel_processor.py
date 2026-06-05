@@ -29,7 +29,7 @@ class SentinelProcessor:
         'O3_PROFILE': (30.0, 30.0), # O₃ (profile): 30km x 30km
     }
     
-    def __init__(self, interpolation_method='rbf', resolution=None, mask_qc_value=0.5, file_type=None):
+    def __init__(self, interpolation_method='rbf', resolution=None, mask_qc_value=0.5, file_type=None, bounds=None):
         """初始化處理器
 
         Parameters:
@@ -71,7 +71,9 @@ class SentinelProcessor:
         else:
             self.resolution = resolution or (5.5, 3.5)
             
-        self.grid_frame = GridFrame(self.resolution)
+        # bounds=None → GridFrame's default Taiwan box (unchanged behaviour);
+        # a region passes its own bounds while keeping the per-product resolution.
+        self.grid_frame = GridFrame(self.resolution, bounds=bounds) if bounds else GridFrame(self.resolution)
 
     def extract_data(self, dataset: xr.Dataset, extract_range: tuple[float, float, float, float] = None):
         """提取數據，可選擇是否限定範圍

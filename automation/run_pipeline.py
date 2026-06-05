@@ -2,6 +2,7 @@
 衛星數據處理Pipeline Controller
 採用物件導向設計，提供更好的錯誤處理和資源管理
 """
+import os
 import logging
 import asyncio
 import threading
@@ -11,7 +12,7 @@ from pathlib import Path
 import schedule
 
 from src.api import SENTINEL5PHub, MODISHub, ERA5Hub, GEMSHub
-from src.config.settings import FILTER_BOUNDARY, FIGURE_BOUNDARY, DATA_RETENTION_DAYS, BASE_DIR, ERA5_STATIONS
+from src.config.settings import FILTER_BOUNDARY, FIGURE_BOUNDARY, DATA_RETENTION_DAYS, BASE_DIR, ERA5_STATIONS, REGIONS
 from src.config.credentials import check_credentials
 from src.utils.file_retention_manager import FileRetentionManager
 
@@ -19,9 +20,18 @@ from src.utils.file_retention_manager import FileRetentionManager
 class SatelliteDataController:
     """衛星數據處理控制器"""
 
-    def __init__(self, data_root: Path):
+    def __init__(self, data_root: Path, region: str | None = None):
         self.logger = self._setup_logging()
         self.data_root = data_root
+
+        # 處理區域：CLI --region > env SATELLITE_REGION > 'taiwan'。
+        # 非 taiwan 會輸出到 processed_<region>/，web 端自動偵測。
+        region = (region or os.getenv('SATELLITE_REGION', 'taiwan')).lower()
+        if region not in REGIONS:
+            raise ValueError(f"未知區域 '{region}'，可用: {sorted(REGIONS)}")
+        self.region = region
+        self.region_bounds = REGIONS[region]
+        self.logger.info(f"Pipeline 區域: {region} bounds={self.region_bounds}")
 
         # 創建線程池執行器
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
@@ -153,13 +163,15 @@ class SatelliteDataController:
                 try:
                     self.logger.info(f"處理 Sentinel-5P {file_type} 數據")
 
-                    sentinel_hub = SENTINEL5PHub(max_workers=3)
+                    sentinel_hub = SENTINEL5PHub(max_workers=3, region=self.region)
+                    # taiwan 維持原本的緊框 filter；其他區域用該區域的 bounds
+                    boundary = FILTER_BOUNDARY if self.region == 'taiwan' else self.region_bounds
                     products = sentinel_hub.fetch_data(
                         file_class=file_class,
                         file_type=file_type,
                         start_date=start_date,
                         end_date=end_date,
-                        boundary=FILTER_BOUNDARY
+                        boundary=boundary
                     )
 
                     if products:
@@ -181,6 +193,11 @@ class SatelliteDataController:
 
     async def _process_modis(self, start_date, end_date):
         """處理 MODIS 數據"""
+        # MODIS 的裁切是 FILTER_BOUNDARY + 寫死的台灣格網，尚未區域化 → 非台灣略過
+        if self.region != 'taiwan':
+            self.logger.info(f"MODIS 尚未支援區域裁切，region={self.region} 略過")
+            return
+
         file_types = ['MYD04_L2', 'MOD04_L2', 'MCD19A2']
 
         self._mark_processing("MODIS")
@@ -228,12 +245,14 @@ class SatelliteDataController:
                 try:
                     self.logger.info(f"處理 GEMS {product_type} 數據")
 
-                    gems_hub = GEMSHub()
+                    gems_hub = GEMSHub(region=self.region)
+                    # taiwan 維持原本 FIGURE_BOUNDARY 的 server 端裁切；其他區域用該區域 bounds
+                    extract_bbox = FIGURE_BOUNDARY if self.region == 'taiwan' else self.region_bounds
                     stats = gems_hub.run_pipeline(
                         product_type=product_type,
                         start_date=start_date,
                         end_date=end_date,
-                        extract_bbox=FIGURE_BOUNDARY,  # (lon_min,lon_max,lat_min,lat_max) 台灣
+                        extract_bbox=extract_bbox,     # (lon_min,lon_max,lat_min,lat_max)
                         max_workers=3,                 # 對政府 API 保守
                         skip_existing=True,            # 可續傳，只補新時次
                         keep_raw=False,                # 網格化後刪本次下載的小原始檔
@@ -411,8 +430,16 @@ class SatelliteDataController:
 
 def main():
     """主函數"""
+    import argparse
+    parser = argparse.ArgumentParser(description='衛星數據處理 Pipeline')
+    parser.add_argument(
+        '--region', default=None,
+        help=f"處理區域 {sorted(REGIONS)}；預設讀 env SATELLITE_REGION,再退回 taiwan",
+    )
+    args = parser.parse_args()
+
     try:
-        controller = SatelliteDataController(BASE_DIR)
+        controller = SatelliteDataController(BASE_DIR, region=args.region)
         controller.start_pipeline()
 
     except Exception as e:

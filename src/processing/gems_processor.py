@@ -66,7 +66,8 @@ class GEMSProcessor:
                  qc_flag_var: str | None = 'FinalAlgorithmFlags',
                  qc_good_value: int = 0,
                  cloud_max: float | None = None,
-                 mask_negative: bool = True):
+                 mask_negative: bool = True,
+                 bounds: tuple[float, float, float, float] | None = None):
         """
         Parameters:
             file_type: 產品（見 PRODUCTS）
@@ -95,7 +96,9 @@ class GEMSProcessor:
         else:
             cfg = self.PRODUCTS.get(file_type)
             self.resolution = (cfg.resolution if cfg and cfg.resolution else self.DEFAULT_RESOLUTION)
-        self.grid_frame = GridFrame(self.resolution)
+        # bounds=None → GridFrame default Taiwan box; a region overrides bounds only
+        # (resolution stays per-product).
+        self.grid_frame = GridFrame(self.resolution, bounds=bounds) if bounds else GridFrame(self.resolution)
 
     # ------------------------------------------------------------------ #
     @property

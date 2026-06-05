@@ -57,8 +57,8 @@ class SentinelHubBase(SatelliteHub):
     name = None  # 例如: "Sentinel-5P", "Sentinel-3"
     collection_name = None  # 例如: "SENTINEL-5P", "SENTINEL-3"
 
-    def __init__(self, max_workers: int = 5):
-        super().__init__()
+    def __init__(self, max_workers: int = 5, region: str = 'taiwan'):
+        super().__init__(region=region)
         self._processor = None  # 初始化為 None，延遲創建
 
         self.auth = CopernicusAuth()
@@ -409,8 +409,8 @@ class SentinelHubBase(SatelliteHub):
             if not hasattr(self, 'file_type'):
                 raise ValueError("未設置file_type，請先呼叫fetch_data方法")
 
-            # 創建處理器實例
-            self._processor = SentinelProcessor()
+            # 創建處理器實例（用區域的格網 bounds，解析度沿用各產品預設）
+            self._processor = SentinelProcessor(bounds=self.region_bounds)
 
             # 設置路徑
             self._processor.raw_dir = self.raw_dir

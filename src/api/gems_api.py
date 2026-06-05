@@ -61,8 +61,8 @@ class GEMSHub(SatelliteHub):
     # 此邊界僅供後續處理/裁切參考，API 查詢/下載階段不使用。
     DEFAULT_BOUNDARY = (100.0, 0.0, 150.0, 50.0)
 
-    def __init__(self, max_workers: int = 3):
-        super().__init__()
+    def __init__(self, max_workers: int = 3, region: str = 'taiwan'):
+        super().__init__(region=region)
         self.max_workers = max_workers
         self._processor = None
         self._reset_stats()
@@ -543,7 +543,7 @@ class GEMSHub(SatelliteHub):
             from src.processing import GEMSProcessor
             # 用對應的 NESC 產品代碼（如 AOD→AERAOD）作為 file_type，與 raw 目錄一致
             file_type = self._resolve_product_code(self.product_type)
-            self._processor = GEMSProcessor(file_type=file_type)
+            self._processor = GEMSProcessor(file_type=file_type, bounds=self.region_bounds)
             self._processor.raw_dir = self.raw_dir
             self._processor.processed_dir = self.processed_dir
             self._processor.figure_dir = self.figure_dir

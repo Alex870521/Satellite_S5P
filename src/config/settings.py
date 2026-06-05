@@ -34,6 +34,15 @@ FILTER_BOUNDARY = (120, 122, 22, 25)  # (118, 124, 20, 27)
 # Taiwan regional boundary
 FIGURE_BOUNDARY = (119, 123, 21, 26)  # (100, 145, 0, 45)
 
+# 處理時的格網裁切區域 (GridFrame bounds: lon_min, lon_max, lat_min, lat_max)。
+# 'taiwan' == GridFrame 預設台灣框(維持原樣,byte-identical)。新增的區域會輸出到
+# 各衛星的 processed_<region>/ 資料夾,web 端會自動偵測成「區域」選項。
+# 解析度不在這裡設定 —— 沿用各產品原本的 self.resolution(維持原解析度)。
+REGIONS = {
+    'taiwan': (118, 124, 20, 27),
+    'east_asia': (100, 150, 0, 50),
+}
+
 # 數據保留天數設定
 # 在使用pipeline下，超過這個天數的檔案將被自動清理
 DATA_RETENTION_DAYS = 30  # 預設保留30天
