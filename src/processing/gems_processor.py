@@ -9,6 +9,7 @@ GEMS 原始檔結構（GK2_GEMS_L2_*.nc，HDF5 群組）：
 經緯度與資料同為 2D swath（如 2048 x 695）。
 """
 import re
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -50,7 +51,7 @@ class GEMSProcessor:
                               'GEMS HCHO Column', cmap='turbo'),
         'SO2': ProductConfig('SO₂', 'ColumnAmountSO2', 0, 1.0e16, 'molecules cm-2',
                              'GEMS SO₂ Column', cmap='turbo'),
-        'AERAOD': ProductConfig('AOD', 'AerosolOpticalDepth', 0, 2.0, 'unitless',
+        'AERAOD': ProductConfig('AOD', 'FinalAerosolOpticalDepth', 0, 2.0, 'unitless',
                                 'GEMS Aerosol Optical Depth', cmap='YlOrBr'),
         'UVI': ProductConfig('UVI', 'UVIndex', 0, 12, 'unitless',
                              'GEMS UV Index', cmap='magma'),
@@ -58,6 +59,11 @@ class GEMSProcessor:
 
     # GEMS 像素 ~3.5 km (南北) x 8 km (東西)：GridFrame 解析度為 (x_km=經度, y_km=緯度)
     DEFAULT_RESOLUTION = (8.0, 3.5)
+
+    # AERAOD 為多波長產品：FinalAerosolOpticalDepth 維度為 (nwavel=3, spatial, image)，
+    # 檔內無波長座標。依 AOD 隨波長遞減的物理特性，三個波段對應 GEMS aerosol 標準的
+    # 354 / 443 / 550 nm（idx 0/1/2）。三個波段都會各自網格化並繪圖。
+    AERAOD_WAVELENGTHS = (354, 443, 550)
 
     def __init__(self,
                  file_type: str = 'NO2',
@@ -147,7 +153,102 @@ class GEMSProcessor:
             data.close()
             geo.close()
 
+    def extract_aerosol_bands(self, nc_file: Path, extract_range=FIGURE_BOUNDARY):
+        """AERAOD 專用：回傳 [(wavelength_nm, lon, lat, var), ...]，每個波段各自 QC。
+
+        FinalAerosolOpticalDepth 為 (nwavel, spatial, image) 三波長。QC 採用
+        「有效值 + 去負 + 落在 (0, vmax] + 範圍內」；不套用 FinalAlgorithmFlags
+        （aerosol 旗標為 bitfield，無官方位元表，==0 會把全部濾掉）。
+        波段內有效點 <10 者略過（內插無意義）。
+        """
+        cfg = self.config
+        data = xr.open_dataset(nc_file, group=self.DATA_GROUP, engine='netcdf4', mask_and_scale=True)
+        geo = xr.open_dataset(nc_file, group=self.GEO_GROUP, engine='netcdf4', mask_and_scale=True)
+        try:
+            if cfg.dataset_name not in data:
+                self.logger.error(f"{nc_file.name}: 找不到變數 {cfg.dataset_name}（有: {list(data.data_vars)[:8]}…）")
+                return []
+            aod = np.asarray(data[cfg.dataset_name].values, dtype='float64')
+            if aod.ndim != 3 or aod.shape[0] != len(self.AERAOD_WAVELENGTHS):
+                self.logger.error(f"{nc_file.name}: AOD 維度非預期 {aod.shape}（預期 {len(self.AERAOD_WAVELENGTHS)} 波長）")
+                return []
+            lat = np.asarray(geo['Latitude'].values, dtype='float64')
+            lon = np.asarray(geo['Longitude'].values, dtype='float64')
+
+            base = np.isfinite(lat) & np.isfinite(lon)
+            if extract_range is not None:
+                lon_min, lon_max, lat_min, lat_max = extract_range
+                base &= (lon >= lon_min) & (lon <= lon_max) & (lat >= lat_min) & (lat <= lat_max)
+
+            bands = []
+            for i, wl in enumerate(self.AERAOD_WAVELENGTHS):
+                v = aod[i]
+                mask = base & np.isfinite(v)
+                if self.mask_negative:
+                    mask &= (v > 0)
+                if cfg.vmax is not None:
+                    mask &= (v <= cfg.vmax)
+                n_keep = int(mask.sum())
+                self.logger.info(f"{nc_file.name} [{wl}nm]: QC 後保留 {n_keep:,} 點（範圍內）")
+                if n_keep >= 10:
+                    bands.append((wl, lon[mask], lat[mask], v[mask]))
+            return bands
+        finally:
+            data.close()
+            geo.close()
+
+    def _interp_to_grid(self, lon, lat, var, lon_grid, lat_grid):
+        """把散點內插到網格；搜尋半徑依資料密度動態調整。"""
+        cell_deg = (abs(lon_grid[0, 1] - lon_grid[0, 0]) + abs(lat_grid[1, 0] - lat_grid[0, 0])) / 2.0
+        n_cells = 2 if var.size < 100 else 3 if var.size < 500 else 4
+        return DataInterpolator.interpolate(
+            lon, lat, var, lon_grid, lat_grid,
+            method=self.interpolation_method,
+            max_distance=n_cells * cell_deg,
+            rbf_function='thin_plate',
+        )
+
+    def _process_aerosol(self, nc_file: Path) -> xr.Dataset | None:
+        """AERAOD：三波長各自網格化，合成單一 Dataset（每波段一個變數）。"""
+        bands = self.extract_aerosol_bands(nc_file, extract_range=FIGURE_BOUNDARY)
+        if not bands:
+            return None
+        lon_grid, lat_grid = self.grid_frame.get_grid(custom_bounds=FIGURE_BOUNDARY)
+        file_time = gems_datetime_from_filename(nc_file.name) or datetime(1970, 1, 1)
+        cfg = self.config
+
+        data_vars = {}
+        for wl, lon, lat, var in bands:
+            var_grid = self._interp_to_grid(lon, lat, var, lon_grid, lat_grid)
+            data_vars[self._aerosol_var_name(wl)] = (
+                ['time', 'latitude', 'longitude'], var_grid[np.newaxis, :, :]
+            )
+        return xr.Dataset(
+            data_vars,
+            coords={
+                'time': np.array([np.datetime64(file_time, 'ns')]),
+                'latitude': np.squeeze(lat_grid[:, 0]),
+                'longitude': np.squeeze(lon_grid[0, :]),
+            },
+            attrs={
+                'units': cfg.units,
+                'time': str(np.datetime64(file_time, 's')),
+                'description': cfg.title,
+                'satellite': 'GEMS (GK-2B)',
+                'processing_method': self.interpolation_method,
+                'resolution_km': str(self.resolution),
+                'wavelengths_nm': ','.join(str(w) for w in self.AERAOD_WAVELENGTHS),
+                'qc_flag': 'finite & >0 & <=vmax（不套用 FinalAlgorithmFlags bitfield）',
+                'cloud_max': 'none' if self.cloud_max is None else str(self.cloud_max),
+            },
+        )
+
+    def _aerosol_var_name(self, wavelength: int) -> str:
+        return f"{self.config.dataset_name}_{wavelength}nm"
+
     def _process_data(self, nc_file: Path) -> xr.Dataset | None:
+        if self.file_type == 'AERAOD':
+            return self._process_aerosol(nc_file)
         result = self.extract_data(nc_file, extract_range=FIGURE_BOUNDARY)
         if result is None:
             return None
@@ -237,25 +338,61 @@ class GEMSProcessor:
             return 'empty'
 
         out_dir.mkdir(parents=True, exist_ok=True)
+        present_vars = list(ds.data_vars)
         ds.to_netcdf(processed)
         if make_figure:
             try:
                 fig_dir = self.figure_dir / self.file_type / year / month
-                fig_dir.mkdir(parents=True, exist_ok=True)
-                plot_global_var(
-                    dataset=processed,
-                    product_params=self.config,
-                    savefig_path=fig_dir / f"{nc_file.stem}.png",
-                    map_scale='Taiwan',
-                    mark_stations=None,
-                )
+                if self.file_type == 'AERAOD':
+                    self._plot_aerosol_bands(processed, present_vars, fig_dir, nc_file.stem)
+                else:
+                    fig_dir.mkdir(parents=True, exist_ok=True)
+                    plot_global_var(
+                        dataset=processed,
+                        product_params=self.config,
+                        savefig_path=fig_dir / f"{nc_file.stem}.png",
+                        map_scale='Taiwan',
+                        mark_stations=None,
+                    )
             except Exception as e:
                 self.logger.error(f"繪圖 {nc_file.name} 失敗: {e}")
         return 'ok'
 
+    def _plot_aerosol_bands(self, processed: Path, present_vars, fig_dir: Path, stem: str):
+        """AERAOD：每個波段畫一張圖，存到各波段子資料夾（讓動畫可分波段製作）。"""
+        for wl in self.AERAOD_WAVELENGTHS:
+            var_name = self._aerosol_var_name(wl)
+            if var_name not in present_vars:
+                continue
+            band_dir = fig_dir / f"{wl}nm"
+            band_dir.mkdir(parents=True, exist_ok=True)
+            band_cfg = replace(self.config, dataset_name=var_name,
+                               title=f"{self.config.title} {wl}nm")
+            plot_global_var(
+                dataset=processed,
+                product_params=band_cfg,
+                savefig_path=band_dir / f"{stem}.png",
+                map_scale='Taiwan',
+                mark_stations=None,
+            )
+
     def animate_month(self, year: str, month: str):
         """把某年月的 PNG 串成逐時動畫 GIF（需 >1 張）。"""
         fig_dir = self.figure_dir / self.file_type / year / month
+        if self.file_type == 'AERAOD':
+            for wl in self.AERAOD_WAVELENGTHS:
+                band_dir = fig_dir / f"{wl}nm"
+                if len(sorted(band_dir.glob("*.png"))) <= 1:
+                    continue
+                try:
+                    animate_data(
+                        image_dir=band_dir,
+                        output_path=band_dir / f"GEMS_AERAOD_{wl}nm_{year}{month}_animation.gif",
+                        date_type='auto', fps=2,
+                    )
+                except Exception as e:
+                    self.logger.error(f"製作 {year}-{month} {wl}nm 動畫失敗: {e}")
+            return
         if len(sorted(fig_dir.glob("*.png"))) <= 1:
             return
         try:
