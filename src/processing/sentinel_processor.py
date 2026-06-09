@@ -141,8 +141,14 @@ class SentinelProcessor:
             
         self.logger.info(f"處理文件: {nc_file.name} ({file_date.strftime('%Y-%m-%d')})")
 
-        # 打開 nc 文件
-        ds = xr.open_dataset(nc_file, engine='netcdf4', group='PRODUCT', chunks='auto')
+        # 打開 nc 文件 — 不要用 chunks(即不要 dask)。原本 chunks='auto' 有兩個雷:
+        # (1) PRODUCT group 含 object-dtype 變數(如 time_utc 字串),'auto' 估其
+        #     byte 大小做自動分塊會報 "Can not use auto rechunking with object dtype";
+        # (2) 改 chunks={} 雖能開檔,但資料變 dask 陣列,後續的布林遮罩索引
+        #     (qa/有效值篩選)在 dask 不允許("boolean dask array ... unknown shape")。
+        # 預設(無 chunks)是 lazy-numpy:每變數存取時才載入成 numpy,布林索引正常,
+        # 未用到的大變數(averaging_kernel/time_utc)不會載入,記憶體無虞。
+        ds = xr.open_dataset(nc_file, engine='netcdf4', group='PRODUCT')
 
         try:
             interpolated_ds = self._process_data(ds, nc_file)
@@ -276,8 +282,8 @@ class SentinelProcessor:
         try:
             import xarray as xr
 
-            # 打開數據集
-            ds = xr.open_dataset(nc_file, chunks='auto')
+            # 打開數據集(lazy-numpy,不用 dask;避免 object/布林索引的 chunks 雷,見上方說明)
+            ds = xr.open_dataset(nc_file)
 
             # 獲取數據變量名
             var_name = PRODUCT_CONFIGS[self.file_type].dataset_name
@@ -470,7 +476,7 @@ class SentinelProcessor:
             self.logger.info("Calculating nearest grid points for stations...")
 
             first_file = processed_files[0]
-            ds_sample = xr.open_dataset(first_file, chunks='auto')
+            ds_sample = xr.open_dataset(first_file)  # lazy-numpy(同上,不用 dask)
 
             # 檢查坐標
             if 'latitude' in ds_sample.coords and 'longitude' in ds_sample.coords:
@@ -661,7 +667,7 @@ class SentinelProcessor:
         try:
             # 處理輸入數據
             if isinstance(dataset_or_file, (str, Path)):
-                ds = xr.open_dataset(dataset_or_file, chunks='auto')
+                ds = xr.open_dataset(dataset_or_file)  # lazy-numpy(同上,不用 dask)
                 should_close = True
                 print(f"Debugging file: {dataset_or_file}")
             else:
@@ -755,10 +761,10 @@ class SentinelProcessor:
 
                     # 構建要清理的路徑
                     clean_paths = {
-                        'raw_data': self.raw_dir / self.file_type / year / month / f"{file_name}.nc",
-                        'output': self.processed_dir / self.file_type / year / month / f"{file_name}.nc",
-                        'figure': self.figure_dir / self.file_type / year / month / f"{file_path.stem}.png",
-                        # 'geotiff': self.geotiff_dir / self.file_type / year / month / f"{file_path.stem}.tiff"
+                        'raw_data': self.raw_dir / 'L2' / self.file_type / year / month / f"{file_name}.nc",
+                        'output': self.processed_dir / 'L2' / self.file_type / year / month / f"{file_name}.nc",
+                        'figure': self.figure_dir / 'L2' / self.file_type / year / month / f"{file_path.stem}.png",
+                        # 'geotiff': self.geotiff_dir / 'L2' / self.file_type / year / month / f"{file_path.stem}.tiff"
                     }
 
                     # 刪除對應的檔案
@@ -922,18 +928,20 @@ class SentinelProcessor:
         for year_month, month_files in files_by_month.items():
             year, month = year_month.split('-')
 
-            # 設置目錄
+            # 設置目錄(raw/processed/figure/geotiff 都在 level 之下:L2)
             paths = {
-                'input': self.raw_dir / self.file_type / year / month,
-                'output': self.processed_dir / self.file_type / year / month,
-                'figure': self.figure_dir / self.file_type / year / month,
-                'geotiff': self.geotiff_dir / self.file_type / year / month
+                'input': self.raw_dir / 'L2' / self.file_type / year / month,
+                'output': self.processed_dir / 'L2' / self.file_type / year / month,
+                'figure': self.figure_dir / 'L2' / self.file_type / year / month,
+                'geotiff': self.geotiff_dir / 'L2' / self.file_type / year / month
             }
 
-            # 創建目錄
-            for dir_path in paths.values():
-                if dir_path != paths['input']:  # 不創建輸入目錄
-                    dir_path.mkdir(parents=True, exist_ok=True)
+            # 創建目錄:只建實際會寫入的(input 不建;geotiff 目前停用 → 不建,
+            # 避免沒跑到的流程留下空資料夾)
+            for key, dir_path in paths.items():
+                if key in ('input', 'geotiff'):
+                    continue
+                dir_path.mkdir(parents=True, exist_ok=True)
 
             # 處理該月的所有文件
             month_processed = 0

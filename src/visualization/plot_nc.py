@@ -375,14 +375,14 @@ def plot_map(dataset, product_params,
 
 
 if __name__ == "__main__":
-    # file_group = '/Volumes/Transcend/Sentinel-5P/raw/NO2___/2024/03/S5P_OFFL_L2__NO2____20240314T031823_20240314T045953_33252_03_020600_20240315T192700.nc'
-    # file_ungroup = '/Volumes/Transcend/Sentinel-5P/processed/NO2___/2024/01/S5P_OFFL_L2__NO2____20240110T045402_20240110T063532_32345_03_020600_20240111T211523.nc'
+    # file_group = '/Volumes/Transcend/Sentinel-5P/raw/L2/NO2___/2024/03/S5P_OFFL_L2__NO2____20240314T031823_20240314T045953_33252_03_020600_20240315T192700.nc'
+    # file_ungroup = '/Volumes/Transcend/Sentinel-5P/processed/L2/NO2___/2024/01/S5P_OFFL_L2__NO2____20240110T045402_20240110T063532_32345_03_020600_20240111T211523.nc'
     # ds = xr.open_dataset(file_ungroup)
     #
     # from netCDF4 import Dataset
     # nc = Dataset(file_ungroup, 'r').groups
 
-    # file = '/Volumes/Transcend/Sentinel-5P/raw/NO2___/2022/01/S5P_OFFL_L2__NO2____20220122T041706_20220122T055836_22158_02_020301_20220123T201801.nc'
+    # file = '/Volumes/Transcend/Sentinel-5P/raw/L2/NO2___/2022/01/S5P_OFFL_L2__NO2____20220122T041706_20220122T055836_22158_02_020301_20220123T201801.nc'
     # plot_global_var(file, product_params=PRODUCT_CONFIGS['NO2___'], map_scale='Taiwan')
     # plot_map(ds, product_params=PRODUCT_CONFIGS['NO2___'], projection_type='platecarree')
     # plot_map(ds, product_params=PRODUCT_CONFIGS['NO2___'], projection_type='orthographic')

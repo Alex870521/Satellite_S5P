@@ -638,12 +638,13 @@ def main():
     print(f"  緯度範圍: {resolution_info['lat_range'][0]:.3f}° 到 {resolution_info['lat_range'][1]:.3f}°")
     print(f"  經度範圍: {resolution_info['lon_range'][0]:.3f}° 到 {resolution_info['lon_range'][1]:.3f}°")
     
+    # 2026-06 起 S5P 多一層 level:raw/L2/<PRODUCT>、processed/L2/<PRODUCT>
     if use_processed_files:
-        # 已處理檔案：從 processed 目錄讀取
-        processor.raw_dir = BASE_DIR / "Sentinel-5P" / "processed"
+        # 已處理檔案：從 processed/L2 目錄讀取
+        processor.raw_dir = BASE_DIR / "Sentinel-5P" / "processed" / "L2"
     else:
-        # 原始檔案：從 raw 目錄讀取
-        processor.raw_dir = BASE_DIR / "Sentinel-5P" / "raw"
+        # 原始檔案：從 raw/L2 目錄讀取
+        processor.raw_dir = BASE_DIR / "Sentinel-5P" / "raw" / "L2"
 
     # 輸出目錄：桌面
     processor.output_dir = Path.home() / "Desktop"

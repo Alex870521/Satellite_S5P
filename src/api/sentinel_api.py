@@ -275,7 +275,7 @@ class SentinelHubBase(SatelliteHub):
                 product_type = self.file_type
                 start_time = product.get('ContentDate', {}).get('Start')
                 date_obj = datetime.strptime(start_time, '%Y-%m-%dT%H:%M:%S.%fZ')
-                output_dir = self.raw_dir / product_type / date_obj.strftime('%Y') / date_obj.strftime('%m')
+                output_dir = self.raw_dir / 'L2' / product_type / date_obj.strftime('%Y') / date_obj.strftime('%m')
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_path = output_dir / file_name
 
@@ -452,6 +452,134 @@ class SentinelHubBase(SatelliteHub):
 
         # 使用處理器處理所有文件
         return self.processor.process_all_files(pattern, start_date, end_date)
+
+    # ------------------------------------------------------------------ #
+    # Level-3 (S5P-PAL gridded) — 官方做好的全球 L3，免金鑰、走 STAC。
+    # 與 L2 路徑(Copernicus OData)並存:L2 自己內插成台灣網格;L3 直接下載官方
+    # 全球網格再裁區域。詳見 [[s5p-pal-l3]] / src/api/s5p_pal.py。
+    # ------------------------------------------------------------------ #
+    # 友善/L2 代碼 -> S5P-PAL L3 product id（NO2 對齊對流層柱)
+    L3_PRODUCT_MAP = {
+        'NO2___': 'no2-tropospheric', 'NO2': 'no2-tropospheric',
+        'O3____': 'o3', 'O3': 'o3',
+        'HCHO__': 'hcho', 'HCHO': 'hcho',
+        'SO2___': 'so2-7km', 'SO2': 'so2-7km',
+        'CO____': 'co', 'CO': 'co',
+        'CH4___': 'ch4', 'CH4': 'ch4',
+        'AER_AI': 'aai', 'AER_LH': 'alh',
+    }
+
+    def _l3_product_id(self, product: str) -> str:
+        """L2/友善代碼 → L3 product id；已是 L3 id 則原樣回傳。"""
+        return self.L3_PRODUCT_MAP.get(product, product)
+
+    def fetch_l3(self, product: str, aggregation: str,
+                 start_date, end_date) -> list[dict]:
+        """查 S5P-PAL L3 清單(不下載)。aggregation: day/fortnight/month/season/year。"""
+        from src.api.s5p_pal import S5PPALClient
+        pid = self._l3_product_id(product)
+        items = S5PPALClient(logger=self.logger).find_items(pid, aggregation, start_date, end_date)
+        self.logger.info(f"S5P-PAL L3 {pid}/{aggregation}: 找到 {len(items)} 筆({start_date}~{end_date})")
+        return items
+
+    def run_l3_pipeline(self, product: str, aggregation: str, start_date, end_date,
+                        keep_global: bool = False, crop: bool = True,
+                        skip_existing: bool = True, limit: int | None = None,
+                        max_workers: int = 1) -> list:
+        """L3 串流式:逐檔「下載全球 → 裁區域(self.region) → 可刪全球」。
+
+        全球 L3 每檔大(日~480MB、月~1GB),裁台灣後極小;keep_global=False(預設)
+        裁完即刪全球原始,磁碟用量持平。輸出:
+            裁切檔 -> processed_dir/L3/{product}/{agg}/{id}.nc
+            全球檔 -> raw_dir/L3/{product}/{agg}/{id}.nc(keep_global=True 才保留)
+
+        max_workers>1:**並發下載**(瓶頸是 S5P-PAL 每連線限速 ~60-80Mbps,實測並行
+            3 條 ≈ 2.1×)。下載並發、但**裁切/寫檔在主執行緒序列**處理(netcdf 寫入
+            非執行緒安全)。keep_global=False 時磁碟峰值 ≈ max_workers 個全球檔。建議 3~4。
+        單檔失敗只記錄、不中斷整批;skip_existing 讓重跑便宜(冪等)。
+        """
+        from src.api.s5p_pal import S5PPALClient
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import xarray as xr
+
+        pid = self._l3_product_id(product)
+        client = S5PPALClient(logger=self.logger)
+        items = client.find_items(pid, aggregation, start_date, end_date)
+        if limit is not None:
+            items = items[:limit]
+        if not items:
+            self.logger.warning("S5P-PAL L3: 無符合資料(檢查 product/aggregation/日期)")
+            return []
+
+        out_proc = self.processed_dir / 'L3' / pid / aggregation
+        out_glob = self.raw_dir / 'L3' / pid / aggregation
+        lon_min, lon_max, lat_min, lat_max = self.region_bounds
+
+        # 1) 先濾掉已完成/無連結,留下要下載的 todo
+        results = []
+        todo = []
+        for it in items:
+            cropped = out_proc / f"{it['id']}.nc"
+            if skip_existing and cropped.exists() and cropped.stat().st_size > 0:
+                results.append(cropped)
+                continue
+            if not it.get('href'):
+                self.logger.warning(f"無下載連結,跳過: {it['id']}")
+                continue
+            todo.append(it)
+        n = len(todo)
+
+        def _download(it):
+            try:
+                return it, client.download(it['href'], out_glob / f"{it['id']}.nc"), None
+            except Exception as ex:
+                return it, None, ex
+
+        # 主執行緒序列:裁切 + 寫檔 + 視情況刪全球(netcdf 寫入非執行緒安全)
+        def _finalize(it, gpath, err, idx):
+            if err or gpath is None:
+                self.logger.error(f"[{idx}/{n}] 下載失敗(略過續跑): {it['id']} — {type(err).__name__ if err else 'no path'}: {err}")
+                if not keep_global:
+                    (out_glob / f"{it['id']}.nc").unlink(missing_ok=True)
+                    (out_glob / f"{it['id']}.nc.part").unlink(missing_ok=True)
+                return
+            try:
+                self.logger.info(f"[{idx}/{n}] 完成下載: {it['id']} ({gpath.stat().st_size/1e6:.0f} MB)")
+                if not crop:
+                    results.append(gpath)
+                    return
+                cropped = out_proc / f"{it['id']}.nc"
+                ds = xr.open_dataset(gpath)
+                asc = bool(ds.latitude.values[1] > ds.latitude.values[0])
+                sub = ds.sel(
+                    longitude=slice(lon_min, lon_max),
+                    latitude=slice(lat_min, lat_max) if asc else slice(lat_max, lat_min),
+                )
+                out_proc.mkdir(parents=True, exist_ok=True)
+                sub.to_netcdf(cropped)
+                ds.close()
+                self.logger.info(f"   裁切 {self.region} 存檔: {cropped.name} {dict(sub.sizes)}")
+                results.append(cropped)
+                if not keep_global:
+                    gpath.unlink(missing_ok=True)
+            except Exception as ex:
+                self.logger.error(f"[{idx}/{n}] 裁切失敗(略過續跑): {it['id']} — {type(ex).__name__}: {ex}")
+                if not keep_global:
+                    gpath.unlink(missing_ok=True)
+
+        # 2) 下載(並發或序列),裁切一律在主執行緒序列
+        if max_workers and max_workers > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futs = [ex.submit(_download, it) for it in todo]
+                for idx, fut in enumerate(as_completed(futs), 1):
+                    it, gpath, err = fut.result()
+                    _finalize(it, gpath, err, idx)
+        else:
+            for idx, it in enumerate(todo, 1):
+                self.logger.info(f"[{idx}/{n}] 下載全球 L3: {it['id']}")
+                it, gpath, err = _download(it)
+                _finalize(it, gpath, err, idx)
+        return results
 
 
 class SENTINEL5PHub(SentinelHubBase):

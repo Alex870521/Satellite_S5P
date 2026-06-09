@@ -40,9 +40,12 @@ python merge_s5p_unified.py --batch
 
 ### 輸入檔案路徑
 
+> **2026-06 結構變更**:Sentinel-5P 的 `raw/processed/figure/geotiff` 都多一層處理階層
+> (`<kind>/<LEVEL>/<PRODUCT>/...`)。L2 = Copernicus 自下載內插;L3 = S5P-PAL 官方全球網格。
+
 #### 原始檔案 (需要重投影和插值)
 ```
-/Volumes/Transcend/Sentinel-5P/raw/
+/Volumes/Transcend/Sentinel-5P/raw/L2/
 ├── NO2___/
 │   └── 2024/
 │       └── 01/
@@ -53,7 +56,7 @@ python merge_s5p_unified.py --batch
 
 #### 已處理檔案 (已經插值到統一網格)
 ```
-/Users/chanchihyu/DataCenter/Satellite/Sentinel-5P/processed/
+/Users/chanchihyu/DataCenter/Satellite/Sentinel-5P/processed/L2/
 ├── NO2___/
 │   └── 2024/
 │       └── 01/
@@ -75,8 +78,8 @@ python merge_s5p_unified.py --batch
 ## 路徑設定邏輯
 
 - **`raw_dir`**: 輸入檔案的位置
-  - 原始檔案：`/Volumes/Transcend/Sentinel-5P/raw/`
-  - 已處理檔案：`/Users/chanchihyu/DataCenter/Satellite/Sentinel-5P/processed/`
+  - 原始檔案：`/Volumes/Transcend/Sentinel-5P/raw/L2/`
+  - 已處理檔案：`/Users/chanchihyu/DataCenter/Satellite/Sentinel-5P/processed/L2/`
 
 - **`output_dir`**: 輸出檔案的位置
   - 統一輸出到：`/Users/chanchihyu/Desktop/`

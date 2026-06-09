@@ -40,9 +40,9 @@ def test_interpolation_comparison():
     print(f"測試期間: {start_date} 到 {end_date}")
     print(f"測試氣體: {gas_type}")
     
-    # 檢查目錄
-    raw_dir = BASE_DIR / "Sentinel-5P" / "raw"
-    processed_dir = BASE_DIR / "Sentinel-5P" / "processed"
+    # 檢查目錄(2026-06 起 S5P 多一層 level:raw/L2、processed/L2)
+    raw_dir = BASE_DIR / "Sentinel-5P" / "raw" / "L2"
+    processed_dir = BASE_DIR / "Sentinel-5P" / "processed" / "L2"
     output_dir = Path.home() / "Desktop"
     
     print(f"\n📁 目錄檢查:")
