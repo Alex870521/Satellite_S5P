@@ -209,6 +209,36 @@ class MODISHub(SatelliteHub):
 
         return self._processor
 
+    def build_daily_grid(self, start_date=None, end_date=None, file_type=None,
+                         resolution: float = 0.1, bounds=None, out_path=None):
+        """Build the faithful daily AOD L3 cube (footprint-aware NN resampling).
+
+        Separate, explicitly-called step (not part of process_data): each day's
+        granules are pooled and resampled so every grid cell a swath footprint
+        covers is filled — see ``src/processing/modis_daily_grid``. Idempotent:
+        re-scans all raw granules, so just re-run after new raw arrives.
+
+        Defaults to this hub's ``file_type`` and the ``start_date``/``end_date``
+        captured by ``fetch_data``; override via args to grid an arbitrary range.
+        Writes to ``processed/<file_type>_binned/`` (its own product folder, kept
+        apart from per-granule nc and the old interpolated cube).
+        """
+        from src.processing.modis_daily_grid import build_daily_aod_grid, DEFAULT_BOUNDS
+
+        ft = file_type or getattr(self, "file_type", None)
+        if ft is None:
+            raise ValueError("file_type not set — pass file_type= or call fetch_data first.")
+        s = start_date or getattr(self, "start_date", None)
+        e = end_date or getattr(self, "end_date", None)
+        if s is None or e is None:
+            raise ValueError("date range not set — pass start_date/end_date or call fetch_data first.")
+
+        out = build_daily_aod_grid(
+            s, e, file_type=ft, base_dir=self.base_dir, resolution=resolution,
+            bounds=bounds or DEFAULT_BOUNDS, out_path=out_path, verbose=False)
+        self.logger.info(f"日合併完成 (footprint-aware NN) → {out}")
+        return out
+
     def process_data(self, pattern=None, start_date=None, end_date=None):
         """處理下載的MODIS數據並生成可視化圖像"""
         # 確保file_type已被設置
