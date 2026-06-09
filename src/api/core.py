@@ -61,7 +61,8 @@ class SatelliteHub(ABC):
         console_handler.setLevel(logging.INFO)
         logger.addHandler(console_handler)
 
-        # Add file handler
+        # Add file handler（logs 一定會用到 → 在這裡才建立,而非 _setup_common_dirs 預建）
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(self.logs_dir / f"{logger_name}_{datetime.now().strftime('%Y%m')}.log")
         file_handler.setLevel(logging.DEBUG)
 
@@ -89,17 +90,16 @@ class SatelliteHub(ABC):
         def _r(base):
             return base if self.region == "taiwan" else f"{base}_{self.region}"
 
+        # 只設定路徑屬性,不在這裡建立資料夾 —— 每個流程(download/process/figure/
+        # geotiff)在實際寫入時才 mkdir(各寫入點都帶 parents=True)。這樣沒跑到的
+        # 流程就不會留下空資料夾。logs 例外:logger 一啟動就會寫,於 _setup_logger 建。
         self.logs_dir = self.main_dir / "logs"
         self.raw_dir = self.main_dir / "raw"   # region-independent downloads
         self.processed_dir = self.main_dir / _r("processed")
         self.figure_dir = self.main_dir / _r("figure")
 
-        for dir_path in [self.main_dir, self.logs_dir, self.raw_dir, self.processed_dir, self.figure_dir]:
-            dir_path.mkdir(parents=True, exist_ok=True)
-
         if self.name == 'Sentinel-5P':
             self.geotiff_dir = self.main_dir / _r("geotiff")
-            self.geotiff_dir.mkdir(parents=True, exist_ok=True)
 
     @abstractmethod
     def authentication(self):
