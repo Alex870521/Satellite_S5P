@@ -152,42 +152,47 @@ class SatelliteDataController:
             self.logger.info("每日衛星數據處理任務全部完成")
 
     async def _process_sentinel5p(self, start_date, end_date):
-        """處理 Sentinel-5P 數據"""
-        file_class = 'NRTI'
-        # TODO: 暫時只跑 NO2；要恢復完整集合改回 ['NO2___', 'HCHO__', 'CO____']
-        file_types = ['NO2___']
+        """處理 Sentinel-5P 數據（NRTI + OFFL 兩種延遲類別 × 網站支援的產品）。
+
+        每個 (class, type) 組合獨立處理,失敗不影響其他。NRTI 無此產品時
+        fetch 回傳空,直接記錄略過(例如 CH4 只有 OFFL,無 NRTI)。
+        """
+        file_classes = ['NRTI', 'OFFL']
+        # 與網站 raster 圖層一致的產品集合（NO2/HCHO/O3/CH4/SO2)。
+        file_types = ['NO2___', 'HCHO__', 'O3____', 'CH4___', 'SO2___']
 
         self._mark_processing("Sentinel-5P")
         try:
-            for file_type in file_types:
-                try:
-                    self.logger.info(f"處理 Sentinel-5P {file_type} 數據")
+            for file_class in file_classes:
+                for file_type in file_types:
+                    try:
+                        self.logger.info(f"處理 Sentinel-5P {file_class} {file_type} 數據")
 
-                    sentinel_hub = SENTINEL5PHub(max_workers=3, region=self.region)
-                    # taiwan 維持原本的緊框 filter；其他區域用該區域的 bounds
-                    boundary = FILTER_BOUNDARY if self.region == 'taiwan' else self.region_bounds
-                    products = sentinel_hub.fetch_data(
-                        file_class=file_class,
-                        file_type=file_type,
-                        start_date=start_date,
-                        end_date=end_date,
-                        boundary=boundary
-                    )
+                        sentinel_hub = SENTINEL5PHub(max_workers=3, region=self.region)
+                        # taiwan 維持原本的緊框 filter；其他區域用該區域的 bounds
+                        boundary = FILTER_BOUNDARY if self.region == 'taiwan' else self.region_bounds
+                        products = sentinel_hub.fetch_data(
+                            file_class=file_class,
+                            file_type=file_type,
+                            start_date=start_date,
+                            end_date=end_date,
+                            boundary=boundary
+                        )
 
-                    if products:
-                        sentinel_hub.download_data(products)
-                        success = sentinel_hub.process_data()
+                        if products:
+                            sentinel_hub.download_data(products)
+                            success = sentinel_hub.process_data()
 
-                        if success:
-                            self.logger.info(f"Sentinel-5P {file_type} 處理成功")
+                            if success:
+                                self.logger.info(f"Sentinel-5P {file_class} {file_type} 處理成功")
+                            else:
+                                self.logger.error(f"Sentinel-5P {file_class} {file_type} 處理失敗")
                         else:
-                            self.logger.error(f"Sentinel-5P {file_type} 處理失敗")
-                    else:
-                        self.logger.info(f"無可用的 Sentinel-5P {file_type} 數據")
+                            self.logger.info(f"無可用的 Sentinel-5P {file_class} {file_type} 數據")
 
-                except Exception as e:
-                    self.logger.error(f"Sentinel-5P {file_type} 處理出錯: {str(e)}")
-                    continue  # 繼續處理下一個類型
+                    except Exception as e:
+                        self.logger.error(f"Sentinel-5P {file_class} {file_type} 處理出錯: {str(e)}")
+                        continue  # 繼續處理下一個組合
         finally:
             self._unmark_processing("Sentinel-5P")
 
