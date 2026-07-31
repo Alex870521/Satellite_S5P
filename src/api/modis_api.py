@@ -14,6 +14,7 @@ SEARCH_BOUNDARY = (119.0, 21.0, 123.0, 26.0)  # 搜索數據的邊界 (west_lon,
 
 
 class MODISHub(SatelliteHub):
+    L3_SOURCE = "modis"
     # API name
     name = 'MODIS'
 

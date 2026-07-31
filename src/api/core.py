@@ -5,6 +5,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from abc import ABC, abstractmethod
 from datetime import datetime
+from pathlib import Path
 from src.config.settings import BASE_DIR, REGIONS
 
 
@@ -140,6 +141,52 @@ class SatelliteHub(ABC):
         self.download_data(products)
         self.process_data()
         return products
+
+    # ------------------------------------------------------------------ #
+    # 統一 L3 regrid(footprint 超取樣 binning → 單一目標網格 + 時間聚合)
+    # ------------------------------------------------------------------ #
+    #: 子類覆寫:hub 名 → l3.runner 認得的 source 名
+    L3_SOURCE: str | None = None
+
+    def l3_raw_files(self, product: str, start_date, end_date):
+        """回傳該產品在時間範圍內的 raw 檔清單。預設用 hub 的 raw_dir 遞迴掃。
+
+        各 hub 的 raw 佈局不同(S5P 多一層 ``L2/``、MODIS 是 ``.hdf``),
+        需要時由子類覆寫。
+        """
+        from src.utils.extract_datetime_from_filename import extract_datetime_from_filename
+
+        root = Path(self.raw_dir)
+        cands = [p for ext in ("*.nc", "*.hdf")
+                 for p in root.rglob(ext)
+                 if product in str(p) and not p.name.startswith("._")]
+        s, e = self._normalize_time_inputs(start_date, end_date, set_timezone=False)
+        out = []
+        for p in cands:
+            d = extract_datetime_from_filename(p.name, to_local=False)
+            if d is None or (s and d < s) or (e and d > e):
+                continue
+            out.append(p)
+        return sorted(out)
+
+    def process_l3(self, product: str, start_date, end_date, out_path, *,
+                   deg: float = 0.02, freq: str = "D", K: int = 4, qa: float = 0.5,
+                   **kwargs):
+        """走統一 L3 pipeline 把 raw 重新網格化成單一目標網格的時間序列 nc。
+
+        與既有 ``process_data()`` **並存**:後者是逐軌 RBF 內插到各產品原生網格,
+        這裡是 footprint 超取樣 binning 到**指定的精確度數網格**、並做時間聚合。
+        兩者互不影響,呼叫端自行選擇。
+        """
+        from src.processing.l3.runner import regrid_to_series
+
+        source = self.L3_SOURCE
+        if source is None:
+            raise NotImplementedError(f"{type(self).__name__} 尚未設定 L3_SOURCE")
+        files = self.l3_raw_files(product, start_date, end_date)
+        self.logger.info(f"L3 regrid {source}/{product}: {len(files)} 個 raw 檔 → {out_path}")
+        return regrid_to_series(source, product, files, out_path,
+                                deg=deg, freq=freq, K=K, qa=qa, **kwargs)
 
     def plot(self):
         """Plot data"""

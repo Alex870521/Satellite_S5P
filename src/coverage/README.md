@@ -16,6 +16,49 @@ python -m src.coverage --hub sentinel5p --product NO2___ --region central \
     --start 2023-01-01 --end 2023-12-31 --granularity monthly --out cov.csv
 ```
 
+## 畫圖
+
+`plot.py` 吃 `compute_coverage` 的 tidy 表畫**覆蓋率分布直方圖**(每格 `coverage`,0–1),依 `region`/`product` 自動分面板,標 70% 門檻線 + Mean/Median/Std + ≥門檻計數(dpi=600)。
+
+```python
+from src.coverage import compute_coverage, plot_coverage_distribution
+df = compute_coverage("sentinel5p", "SO2___", "central", "2023-01-01", "2023-12-31")
+plot_coverage_distribution(df, "cov_dist.png", threshold=0.7)
+```
+
+```bash
+# CLI:算覆蓋率順手存分布圖
+python -m src.coverage --hub sentinel5p --product SO2___ --region central \
+    --start 2023-01-01 --end 2023-12-31 --plot cov_dist.png --threshold 0.7
+```
+
+## 代表日地圖(representative days)
+
+依覆蓋率把每天分到 5 個區間(Low/Medium-Low/Medium/Good/Excellent),每區間挑**最接近中點**那天,畫出該天的 **processed 產品場**(同日多軌取聯集),疊區域邊界 + 海岸線。注意:畫的是覆蓋率產品本身,**不是**排放圖(wip 原版那種「通量散度排放 + raw L2 像素」靠 wip_emission 引擎,不在本工具)。
+
+```python
+from src.coverage import compute_coverage, plot_representative_days
+df = compute_coverage("sentinel5p", "NO2___", "central", "2023-01-01", "2023-12-31")
+plot_representative_days(df, output="rep_days.png")  # df 須單一 hub/product/region、daily
+```
+
+```bash
+python -m src.coverage --hub sentinel5p --product NO2___ --region central \
+    --start 2023-01-01 --end 2023-12-31 --granularity daily --rep-days rep_days.png
+```
+
+## QA 閾值掃描(raw L2,獨立模組)
+
+`qa_sweep.py` 讀 **raw** TROPOMI L2,掃不同 `qa_value` 門檻對 bbox 內空間覆蓋率的影響——與 `compute_coverage`(讀 processed、QC 已套用)是不同層次,故獨立。region 僅支援 bbox。
+
+```bash
+python -m src.coverage.qa_sweep --product NO2___ \
+    --start 2023-01-01 --end 2023-12-31 --qa 0.5 0.7 0.75 \
+    --region figure --sample 500 --out qa_stats.csv --plot qa_sweep.png --report qa.md
+```
+
+輸出:per-granule CSV、2×2 圖(分布/箱型/均值±σ/均值-vs-qa)、Markdown 統計報告。`--sample` 帶 seed 可重現。
+
 ## 參數
 
 - `--hub`：`sentinel5p sentinel3 gems modis era5 himawari`(別名 s5p/s3)
@@ -37,3 +80,32 @@ python -m src.coverage --hub sentinel5p --product NO2___ --region central \
 - ERA5(逐站 CSV)、Himawari(mock)為 stub。
 
 各 hub 原始/處理後檔結構見 [`SCHEMA.md`](SCHEMA.md)。前身原型在 `wip_coverage/`。
+
+## 逐格統計(對時間 reduction → 地圖)
+
+`maps.py` 與上面的覆蓋率計算**軸向正交**:`compute_coverage` 是對**空間** reduction
+(區域內有效格/總格數)→ 時間序列;這裡是對**時間** reduction(每格有幾天有觀測)→ 地圖。
+
+```python
+from src.coverage import per_cell_stats, plot_cell_stats
+st = per_cell_stats("~/Satellite/Data/MODIS_aod_l3_02deg_2023.nc")
+# st = {"mean", "count", "coverage"(0-100%), "n_time", "var"}
+plot_cell_stats("...nc", product="MCD19A2", output="aod_cellstats.png")   # 三聯圖
+```
+
+⚠️ 這裡的 `count` 是**時間維度上有幾天有資料**,和 L3 檔裡的 `<var>_count`
+(超取樣子點數 = 空間取樣密度)**不是同一件事**,同名不同義。
+
+## Raw L2 footprint 圖
+
+其餘功能都讀 processed 網格;`plot.py` 的這組讀 **raw L2**,把每個 sounding 畫成
+它真正的 footprint 四邊形(角點直接取自檔案,非從中心推導)—— 這是唯一能看到
+像元斜放、掃描邊緣脹大、軌道間真實空隙的視角,拿來目視檢查
+`src.processing.l3` 的超取樣 binning 在 bin 什麼很直接。
+
+```python
+from src.coverage import plot_raw_l2_coverage
+plot_raw_l2_coverage("2024-06-15", product="NO2___", region="central",
+                     scale=6.022e23/1e4/1e15,      # mol/m2 → 1e15 molec/cm2
+                     output="raw_l2.png")
+```

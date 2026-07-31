@@ -14,10 +14,17 @@ from src.processing.l3.regridder import (
 )
 from src.processing.l3.writer import L3Writer
 from src.processing.l3.pipeline import L3Pipeline, L3Accumulator
-from src.processing.l3.adapters import S5PAdapter
+from src.processing.l3.adapters import S5PAdapter, MODISAdapter, GEMSAdapter
+from src.processing.l3.level import detect_level, is_l3
+from src.processing.l3.ingest import ingest_l3, read_l3
+from src.processing.l3.compare import compare_fields, format_comparison
+from src.processing.l3.harp_oracle import harp_available, harp_oracle
 
 __all__ = [
     "GranuleL2", "GridSpec", "GriddedField",
     "SupersampleBinRegridder", "RbfRegridder", "corners_from_centers",
-    "L3Writer", "L3Pipeline", "L3Accumulator", "S5PAdapter",
+    "L3Writer", "L3Pipeline", "L3Accumulator",
+    "S5PAdapter", "MODISAdapter", "GEMSAdapter",
+    "detect_level", "is_l3", "ingest_l3", "read_l3",
+    "compare_fields", "format_comparison", "harp_available", "harp_oracle",
 ]

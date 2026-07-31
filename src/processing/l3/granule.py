@@ -18,24 +18,62 @@ from src.config.catalog import ProductConfig
 class GridSpec:
     """目標網格的唯一真相。
 
-    從 km 解析度(+ 可選 bounds)建 GridFrame,導出 cell 中心、bin 邊界,
-    以及離線 HARP oracle 用的 bin_spatial 參數字串。三個 source 共用同一 GridSpec
-    → 輸出逐格對齊,跨衛星疊圖/時間聚合才落在同一網格。
+    兩種建法,擇一:
+
+    * **km 模式**(``resolution``):走 GridFrame,把公里換算成度數。沿用舊行為,
+      但換算依緯度而變 → 度數不是整數,格數也不好預測。適合「跟著儀器原生足跡走」。
+    * **度數模式**(``deg``):直接用 ``np.arange`` 產生精確的度數網格。統一解析度時
+      **必須**用這個 —— 目標網格要能逐格重現、且跨 source/跨年完全一致,km 換算的
+      浮點漂移會讓格數在 201/202 之間跳。
+
+    三個 source 共用同一 GridSpec → 輸出逐格對齊,跨衛星疊圖/時間聚合才落在同一網格。
     """
 
-    resolution: tuple[float, float]                               # (km_x, km_y)
+    resolution: tuple[float, float] | None = None                 # (km_x, km_y)
     bounds: tuple[float, float, float, float] | None = None       # lon_min, lon_max, lat_min, lat_max
+    deg: tuple[float, float] | None = None                        # (deg_lon, deg_lat) 精確度數網格
+
+    # 度數↔公里換算(與 GridFrame 同一組常數,只用來把 deg 模式的等效 km 填進 metadata)
+    _LAT_KM_PER_DEG = 111.32
+    _EARTH_RADIUS_KM = 6371.0
 
     def __post_init__(self):
-        self._gf = GridFrame(self.resolution, bounds=self.bounds) if self.bounds else GridFrame(self.resolution)
+        if self.deg is not None:
+            if self.bounds is None:
+                raise ValueError("deg 模式必須同時給 bounds=(lon_min, lon_max, lat_min, lat_max)")
+            lon_min, lon_max, lat_min, lat_max = self.bounds
+            dlon, dlat = self.deg
+            # +1e-9 讓終點含進來(等同 config.py 的 arange(..., stop + 1e-6, res) 慣例);
+            # round 到 6 位小數消掉 arange 的浮點尾巴,確保逐格值可重現。
+            self._lon_arr = np.round(np.arange(lon_min, lon_max + 1e-9, dlon), 6)
+            self._lat_arr = np.round(np.arange(lat_min, lat_max + 1e-9, dlat), 6)
+            self._gf = None
+            if self.resolution is None:                 # 補等效 km,供 writer metadata
+                center_lat = (lat_min + lat_max) / 2
+                km_per_deg_lon = (self._EARTH_RADIUS_KM * np.cos(np.radians(center_lat))
+                                  * 2 * np.pi / 360)
+                self.resolution = (round(float(dlon * km_per_deg_lon), 4),
+                                   round(float(dlat * self._LAT_KM_PER_DEG), 4))
+        else:
+            if self.resolution is None:
+                raise ValueError("必須給 resolution(km 模式)或 deg(度數模式)")
+            self._gf = GridFrame(self.resolution, bounds=self.bounds) if self.bounds else GridFrame(self.resolution)
+            self._lat_arr = self._lon_arr = None
+
+    @classmethod
+    def from_degrees(cls, deg: float | tuple[float, float],
+                     bounds: tuple[float, float, float, float]) -> "GridSpec":
+        """精確度數網格。``deg`` 給單一數字 = 經緯同解析度。"""
+        d = (deg, deg) if isinstance(deg, (int, float)) else deg
+        return cls(bounds=bounds, deg=d)
 
     @property
     def lat(self) -> np.ndarray:
-        return self._gf.lat
+        return self._lat_arr if self._gf is None else self._gf.lat
 
     @property
     def lon(self) -> np.ndarray:
-        return self._gf.lon
+        return self._lon_arr if self._gf is None else self._gf.lon
 
     @staticmethod
     def _edges(c: np.ndarray) -> np.ndarray:

@@ -282,7 +282,74 @@ PRODUCT_CONFIGS: dict[str, ProductConfig] = {
         title=f'Aerosol Index',
         cmap='viridis',
         resolution=(5.5, 3.5)  # AER (AI): 5.5km x 3.5km
-    )
+    ),
+    # --- 非 Sentinel-5P 的產品(L3 pipeline 需要同一份 metadata 真相) ---
+    'MCD19A2': ProductConfig(
+        display_name='AOD',
+        dataset_name='aod',
+        vmin=0, vmax=1.5,
+        units='Aerosol Optical Depth (550 nm)',
+        title='MAIAC Aerosol Optical Depth',
+        cmap='YlOrRd',
+        resolution=(1.0, 1.0)  # MAIAC: 1km x 1km
+    ),
+    'MOD04_L2': ProductConfig(
+        display_name='AOD',
+        dataset_name='aod',
+        vmin=0, vmax=1.5,
+        units='Aerosol Optical Depth (550 nm)',
+        title='MODIS Terra Aerosol Optical Depth',
+        cmap='YlOrRd',
+        resolution=(10.0, 10.0)  # Dark Target/Deep Blue: 10km(nadir)
+    ),
+    'MYD04_L2': ProductConfig(
+        display_name='AOD',
+        dataset_name='aod',
+        vmin=0, vmax=1.5,
+        units='Aerosol Optical Depth (550 nm)',
+        title='MODIS Aqua Aerosol Optical Depth',
+        cmap='YlOrRd',
+        resolution=(10.0, 10.0)
+    ),
+    # ⚠️ GEMS_NO2 的 ColumnAmountNO2 是**總柱量**(long_name: "Total NO2 Column Amount")。
+    # 實測台灣上空平流層佔總柱量 71.6%,用它代替對流層會高估 204% ——
+    # 要和 TROPOMI 的 nitrogendioxide_tropospheric_column 比,必須用 GEMS_NO2_TROP。
+    'GEMS_NO2': ProductConfig(
+        display_name='NO₂',
+        dataset_name='ColumnAmountNO2',
+        vmin=0, vmax=1e16,
+        units='NO$_2$ Total Column (molecules cm$^{-2}$)',
+        title='GEMS NO$_2$ Total Column',
+        cmap='turbo',
+        resolution=(8.0, 3.5)  # GEMS: ~8km EW x 3.5km NS
+    ),
+    'GEMS_NO2_TROP': ProductConfig(
+        display_name='NO₂',
+        dataset_name='ColumnAmountNO2Trop',
+        vmin=0, vmax=5e15,
+        units='NO$_2$ Tropospheric Column (molecules cm$^{-2}$)',
+        title='GEMS NO$_2$ Tropospheric Column',
+        cmap='turbo',
+        resolution=(8.0, 3.5)
+    ),
+    'GEMS_NO2_STRAT': ProductConfig(
+        display_name='NO₂',
+        dataset_name='ColumnAmountNO2Strat',
+        vmin=0, vmax=5e15,
+        units='NO$_2$ Stratospheric Column (molecules cm$^{-2}$)',
+        title='GEMS NO$_2$ Stratospheric Column',
+        cmap='turbo',
+        resolution=(8.0, 3.5)
+    ),
+    'GEMS_O3T': ProductConfig(
+        display_name='O₃',
+        dataset_name='ColumnAmountO3',
+        vmin=None, vmax=None,
+        units='O$_3$ Total Column (DU)',
+        title='GEMS O$_3$ Total Column',
+        cmap='turbo',
+        resolution=(8.0, 3.5)
+    ),
 }
 
 

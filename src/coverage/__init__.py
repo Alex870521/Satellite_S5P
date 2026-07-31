@@ -19,9 +19,18 @@ from .base import Slice, CoverageRow
 from .registry import HUB_SPECS, get_spec
 from .reader import get_reader
 from .region import AIR_QUALITY_ZONES, region_mask
+from .plot import (plot_coverage_distribution, select_representative_days,
+                   plot_representative_days)
+from .qa_sweep import sweep_qa, plot_qa_sweep
+from .plot import load_raw_l2, plot_raw_l2_pixels, plot_raw_l2_coverage
+from .maps import per_cell_stats, plot_cell_stats
 
 __all__ = [
     "compute_coverage", "Slice", "CoverageRow",
     "HUB_SPECS", "get_spec", "get_reader",
     "AIR_QUALITY_ZONES", "region_mask",
+    "plot_coverage_distribution", "select_representative_days",
+    "plot_representative_days", "sweep_qa", "plot_qa_sweep",
+    "load_raw_l2", "plot_raw_l2_pixels", "plot_raw_l2_coverage",
+    "per_cell_stats", "plot_cell_stats",
 ]

@@ -7,11 +7,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Iterator, Protocol
 
+from src.config.catalog import ProductConfig
 from src.processing.l3.granule import GranuleL2
 
 
 class L2Adapter(Protocol):
     source: str
+    product: ProductConfig   # pipeline 在 L3 分支也會用到(取 dataset_name/metadata)
 
     def read(self, nc_file: str | Path) -> GranuleL2 | None:
         """讀單一原始檔 → GranuleL2;無法讀/無資料回 None。"""

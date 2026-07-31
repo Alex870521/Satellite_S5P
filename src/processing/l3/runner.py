@@ -1,0 +1,77 @@
+"""把「一批 raw 檔 → 統一網格的時間序列 nc」包成一個可重用的函式。
+
+``scripts/l3_regrid_year.py``(CLI)與各 hub 的 ``process_l3()``(API 委派)都走這裡,
+避免兩邊各寫一份編排邏輯。
+"""
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import Iterable
+
+import numpy as np
+
+from src.processing.l3.granule import GridSpec
+from src.processing.l3.pipeline import L3Pipeline
+from src.processing.l3.regridder import SupersampleBinRegridder
+from src.processing.l3.writer import L3Writer
+
+DEFAULT_BOUNDS = (119.0, 123.0, 21.0, 26.0)
+
+SHORT_NAME = {"NO2___": "no2", "O3____": "o3", "SO2___": "so2", "HCHO__": "hcho",
+              "MCD19A2": "aod", "MOD04_L2": "aod", "MYD04_L2": "aod"}
+
+
+def make_adapter(source: str, product: str):
+    """source 名 → adapter 實例。"""
+    source = source.lower()
+    if source in ("s5p", "sentinel5p"):
+        from src.processing.l3.adapters import S5PAdapter
+        return S5PAdapter(product)
+    if source == "modis":
+        from src.processing.l3.adapters import MODISAdapter
+        return MODISAdapter(product)
+    if source == "gems":
+        from src.processing.l3.adapters import GEMSAdapter
+        return GEMSAdapter(product)
+    raise ValueError(f"未知 source: {source!r}")
+
+
+def regrid_to_series(source: str, product: str, files: Iterable[str | Path],
+                     out_path: str | Path, *,
+                     deg: float = 0.02,
+                     bounds: tuple[float, float, float, float] = DEFAULT_BOUNDS,
+                     freq: str = "D", K: int = 4, qa: float = 0.5,
+                     short_name: str | None = None,
+                     extra_attrs: dict | None = None,
+                     progress=None) -> dict:
+    """一批 raw → 統一網格的 ``(time, lat, lon)`` nc。
+
+    回傳統計 dict(``n_files``/``n_periods``/``mean_coverage``/``out``/``seconds``)。
+    """
+    files = [Path(f) for f in files]
+    if not files:
+        raise FileNotFoundError(f"{source}/{product}: 沒有可處理的 raw 檔")
+
+    grid = GridSpec.from_degrees(deg, bounds)
+    adapter = make_adapter(source, product)
+    pipe = L3Pipeline(adapter, SupersampleBinRegridder(K=K, qa_threshold=qa),
+                      grid, L3Writer())
+
+    t0 = time.time()
+    res = pipe.aggregate(files, freq=freq, progress=progress)
+    if not res:
+        raise ValueError(f"{source}/{product}: 聚合結果為空(所有 granule 都無有效資料)")
+
+    periods = [p for p, _ in res]
+    results = [r for _, r in res]
+    attrs = {"source": source, "product": product,
+             "n_source_files": str(len(files)), "qa_threshold": str(qa),
+             "supersample_K": str(K), "freq": freq}
+    attrs.update(extra_attrs or {})
+    out = L3Writer().write_series(periods, results, grid, adapter.product, out_path,
+                                  short_name=short_name or SHORT_NAME.get(product),
+                                  extra_attrs=attrs)
+    cov = float(np.mean([np.isfinite(r["value"]).mean() for r in results]) * 100)
+    return {"n_files": len(files), "n_periods": len(res), "mean_coverage": cov,
+            "out": out, "seconds": time.time() - t0}

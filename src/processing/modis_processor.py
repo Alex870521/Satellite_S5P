@@ -1024,27 +1024,37 @@ class MODISProcessor:
             self.logger.error(f"合併文件時發生錯誤: {e}")
             return False
 
-    def _extract_mcd19a2_data(self, hdf_obj, datasets, filename: str = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
-        """從 MCD19A2 文件中提取 AOD 數據和座標"""
+    def _extract_mcd19a2_data(self, hdf_obj, datasets, filename: str = None,
+                              keep_orbits: bool = False) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+        """從 MCD19A2 文件中提取 AOD 數據和座標。
+
+        MCD19A2 的 ``Optical_Depth_047`` 是 ``(orbit, y, x)`` —— 一天多次過境,實測每檔
+        2~4 層。預設 ``keep_orbits=False`` 只取第一層(**沿用舊行為,不動既有輸出**),
+        但那會丟掉大量資料:實測 8 個檔第一層合計 327k 有效點、全層聯集 866k(多 165%),
+        而且會出現「第一層全空但其他層有兩萬多點」的整天誤判為空。
+
+        ``keep_orbits=True`` 回傳未收合的 3D,由呼叫端決定怎麼合併(L3 adapter 走
+        沿軌道 nanmean)。座標永遠是 2D ``(y, x)``,對所有層共用。
+        """
         try:
             aod_name = 'Optical_Depth_047'
             if aod_name not in datasets:
                 aod_name = 'Optical_Depth_055'
                 if aod_name not in datasets:
                     return None, None, None
-            
+
             # 獲取 AOD 數據（pyhdf）
             aod_data, aod_attrs = self._get_data_pyhdf(hdf_obj, aod_name)
 
             if aod_data is None:
                 return None, None, None
 
-            # MCD19A2 是3D數據，取第一個時間層
-            if len(aod_data.shape) == 3:
+            # MCD19A2 是 3D (orbit, y, x)
+            if len(aod_data.shape) == 3 and not keep_orbits:
                 aod_data = aod_data[0, :, :]
-            
-            # 生成地理座標
-            latitude, longitude = self._generate_mcd19a2_coordinates(aod_data.shape, filename or "MCD19A2.hdf")
+
+            # 生成地理座標（永遠用空間兩維，3D 時所有層共用同一組座標）
+            latitude, longitude = self._generate_mcd19a2_coordinates(aod_data.shape[-2:], filename or "MCD19A2.hdf")
             
             # 處理數據
             scale_factor = aod_attrs.get('scale_factor', 0.0001)
@@ -1427,34 +1437,25 @@ class MODISProcessor:
             return np.full((len(target_lat), len(target_lon)), np.nan)
     
     def _distance_weighted_interpolation(self, source_lat, source_lon, aod_valid, target_lat, target_lon, max_distance=0.2):
-        """距離加權插值 - 基於 NASA MODIS 處理方法"""
-        target_grid = np.full((len(target_lat), len(target_lon)), np.nan)
-        
-        # 對每個目標網格點進行插值
-        for i in range(len(target_lat)):
-            for j in range(len(target_lon)):
-                target_lat_val = target_lat[i]
-                target_lon_val = target_lon[j]
-                
-                # 計算到所有源數據點的距離
-                distances = np.sqrt((source_lat - target_lat_val)**2 + 
-                                  (source_lon - target_lon_val)**2)
-                
-                # 找到在最大距離內的數據點
-                valid_mask = distances <= max_distance
-                
-                if np.any(valid_mask):
-                    valid_distances = distances[valid_mask]
-                    valid_aod = aod_valid[valid_mask]
-                    
-                    # 計算距離權重（距離越近權重越大）
-                    weights = 1.0 / (valid_distances + 1e-6)  # 避免除零
-                    
-                    # 加權平均
-                    weighted_aod = np.average(valid_aod, weights=weights)
-                    target_grid[i, j] = weighted_aod
-        
-        return target_grid
+        """距離加權插值 - 基於 NASA MODIS 處理方法。
+
+        用 cKDTree 半徑查詢向量化，取代 O(網格×源點) 的雙重 Python 迴圈（否則單日卡死）。
+        距離度量與 max_distance 權重公式不變。
+        """
+        from scipy.spatial import cKDTree
+        tlon, tlat = np.meshgrid(target_lon, target_lat)
+        target_pts = np.column_stack([tlat.ravel(), tlon.ravel()])
+        tree = cKDTree(np.column_stack([np.asarray(source_lat), np.asarray(source_lon)]))
+        aod = np.asarray(aod_valid)
+
+        flat = np.full(len(target_pts), np.nan)
+        neighbors = tree.query_ball_point(target_pts, r=max_distance)
+        for idx, nb in enumerate(neighbors):
+            if nb:
+                d = np.sqrt(((target_pts[idx] - tree.data[nb]) ** 2).sum(axis=1))
+                w = 1.0 / (d + 1e-6)
+                flat[idx] = np.average(aod[nb], weights=w)
+        return flat.reshape(len(target_lat), len(target_lon))
     
     def _linear_interpolation_with_distance_limit(self, source_lat, source_lon, aod_valid, target_lat, target_lon, max_distance=0.15):
         """帶距離限制的線性插值"""
@@ -1476,23 +1477,16 @@ class MODISProcessor:
             
             # 過濾掉不合理的值
             target_grid[target_grid < 0] = np.nan
-            
+
             # 應用距離限制（只保留在有效數據點附近的插值結果）
-            distance_limited_grid = np.full_like(target_grid, np.nan)
-            for i in range(len(target_lat)):
-                for j in range(len(target_lon)):
-                    target_lat_val = target_lat[i]
-                    target_lon_val = target_lon[j]
-                    
-                    # 計算到最近源數據點的距離
-                    distances = np.sqrt((source_lat - target_lat_val)**2 + 
-                                      (source_lon - target_lon_val)**2)
-                    min_distance = np.min(distances)
-                    
-                    # 只有在最大距離內才保留插值結果
-                    if min_distance <= max_distance and not np.isnan(target_grid[i, j]):
-                        distance_limited_grid[i, j] = target_grid[i, j]
-            
+            # 用 cKDTree 向量化最近距離查詢，取代 O(網格×源點) 的雙重 Python 迴圈
+            # （否則單日 ~20萬格 × ~11萬源點 ≈ 2e10 次運算會卡死）。距離度量與門檻不變。
+            from scipy.spatial import cKDTree
+            tree = cKDTree(source_points)
+            min_dist, _ = tree.query(target_points, k=1)        # 每個目標點到最近源點的距離
+            within = (min_dist <= max_distance).reshape(target_grid.shape)
+            distance_limited_grid = np.where(within, target_grid, np.nan)
+
             return distance_limited_grid
             
         except ImportError:
@@ -1500,27 +1494,15 @@ class MODISProcessor:
             return self._distance_weighted_interpolation(source_lat, source_lon, aod_valid, target_lat, target_lon, max_distance)
     
     def _nearest_neighbor_with_distance_limit(self, source_lat, source_lon, aod_valid, target_lat, target_lon, max_distance=0.25):
-        """帶距離限制的最近鄰插值"""
-        target_grid = np.full((len(target_lat), len(target_lon)), np.nan)
-        
-        for i in range(len(target_lat)):
-            for j in range(len(target_lon)):
-                target_lat_val = target_lat[i]
-                target_lon_val = target_lon[j]
-                
-                # 計算到所有源數據點的距離
-                distances = np.sqrt((source_lat - target_lat_val)**2 + 
-                                  (source_lon - target_lon_val)**2)
-                
-                # 找到最近的數據點
-                min_distance_idx = np.argmin(distances)
-                min_distance = distances[min_distance_idx]
-                
-                # 只有在最大距離內才進行插值
-                if min_distance <= max_distance:
-                    target_grid[i, j] = aod_valid[min_distance_idx]
-        
-        return target_grid
+        """帶距離限制的最近鄰插值（cKDTree 向量化，取代雙重 Python 迴圈）。"""
+        from scipy.spatial import cKDTree
+        tlon, tlat = np.meshgrid(target_lon, target_lat)
+        target_pts = np.column_stack([tlat.ravel(), tlon.ravel()])
+        tree = cKDTree(np.column_stack([np.asarray(source_lat), np.asarray(source_lon)]))
+        aod = np.asarray(aod_valid)
+        dist, idx = tree.query(target_pts, k=1)
+        vals = np.where(dist <= max_distance, aod[idx], np.nan)
+        return vals.reshape(len(target_lat), len(target_lon))
     
     def _direct_fill_interpolation(self, source_lat, source_lon, aod_valid, target_lat, target_lon):
         """直接填充方法（原始方法）"""

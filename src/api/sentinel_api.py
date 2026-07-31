@@ -584,6 +584,7 @@ class SentinelHubBase(SatelliteHub):
 
 class SENTINEL5PHub(SentinelHubBase):
     """Sentinel-5P 衛星數據 API"""
+    L3_SOURCE = "s5p"
     name = "Sentinel-5P"
     collection_name = "SENTINEL-5P"
 

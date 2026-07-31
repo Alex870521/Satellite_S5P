@@ -1,7 +1,10 @@
-"""L3Pipeline:Adapter → Regridder → Writer 的編排器。
+"""L3Pipeline:Adapter → Regridder → Writer 的編排器(level-aware)。
 
-階段一(現況):逐軌格網化。process_file/process_files 把每個 granule regrid 成
-一張 GriddedField,寫 nc + 圖。
+每個檔先自動偵測 level:
+  * **L2 swath** → Adapter 讀 → SupersampleBinRegridder 格網化(原本的路徑)。
+  * **已是 L3 grid** → 跳過 regrid,改 ``ingest_l3`` 讀+對齊到同一 GridSpec。
+兩條路徑都吐 GriddedField,寫 nc/圖、時間聚合(L3Accumulator)完全共用。
+
 階段二(預留):L3Accumulator 在固定網格上做時間聚合(daily/monthly 加權平均)。
 """
 from __future__ import annotations
@@ -12,6 +15,8 @@ from typing import Iterable
 import numpy as np
 
 from src.processing.l3.granule import GranuleL2, GridSpec, GriddedField
+from src.processing.l3.ingest import ingest_l3
+from src.processing.l3.level import detect_level
 from src.processing.l3.writer import L3Writer
 
 
@@ -25,13 +30,29 @@ class L3Pipeline:
     def regrid_granule(self, g: GranuleL2) -> GriddedField:
         return self.regridder.regrid(g, self.grid)
 
-    def process_file(self, nc_file: str | Path,
-                     out_nc: str | Path | None = None,
-                     fig_path: str | Path | None = None) -> GriddedField | None:
+    def build_field(self, nc_file: str | Path,
+                    level: str | None = None) -> GriddedField | None:
+        """讀一個檔 → GriddedField,依 level 決定 regrid(L2)或對齊(L3)。
+
+        ``level`` 預設 None = 自動偵測;傳 "L2"/"L3" 可手動覆寫。
+        """
+        nc_file = Path(nc_file)
+        lvl = level or detect_level(nc_file)
+        if lvl == "L3":
+            return ingest_l3(nc_file, self.grid, self.adapter.product,
+                             source=getattr(self.adapter, "source", ""))
         g = self.adapter.read(nc_file)
         if g is None:
             return None
-        gf = self.regrid_granule(g)
+        return self.regrid_granule(g)
+
+    def process_file(self, nc_file: str | Path,
+                     out_nc: str | Path | None = None,
+                     fig_path: str | Path | None = None,
+                     level: str | None = None) -> GriddedField | None:
+        gf = self.build_field(nc_file, level=level)
+        if gf is None:
+            return None
         if out_nc is not None:
             self.writer.write_nc(gf, out_nc)
             if fig_path is not None:
@@ -45,6 +66,77 @@ class L3Pipeline:
             out_nc = (Path(out_dir) / f.name) if out_dir else None
             results.append(self.process_file(f, out_nc=out_nc))
         return results
+
+    # ------------------------------------------------------------------ #
+    # 階段二:時間聚合
+    # ------------------------------------------------------------------ #
+    def aggregate(self, files: Iterable[str | Path], freq: str = "D",
+                  level: str | None = None, on_period=None, progress=None):
+        """把多個 granule 依時間分窗(freq)聚合成每窗一張場。
+
+        因為每個 granule 經超取樣後就已經在同一張固定網格上,聚合 = 逐格加權平均
+        (權重 = 該格的子點 count),由 :class:`L3Accumulator` 累加。
+
+        ``freq``: ``"D"`` 日 / ``"M"`` 月 / ``"Y"`` 年。
+        ``on_period(period, result)``: 每完成一窗就回呼(可邊做邊寫檔,不必全留記憶體)。
+        回傳 ``[(period, {"value","count","std"}), ...]``,依時間排序。
+
+        **串流**:先用檔名日期把檔案排成時間序,再一邊讀一邊累加,換窗即 finalize →
+        任何時刻只有一個 accumulator 活著(~1.6MB);若改成「先全部讀進來再分組」,
+        整年 daily 會佔約 350MB。三個 source 的檔名都內含日期(S5P `…_YYYYMMDDThhmmss_`、
+        MODIS `.AYYYYDDD.`、GEMS `_YYYYMMDD_hhmm_`),故排序不需先開檔。
+        """
+        ordered = sorted((Path(f) for f in files), key=_name_sort_key)
+
+        out, acc, cur = [], None, None
+        seen: set = set()
+        for f in ordered:
+            gf = self.build_field(f, level=level)
+            if progress:
+                progress(f, gf)
+            if gf is None:
+                continue
+            period = _period_key(np.datetime64(gf.time, "ns"), freq)
+            if cur is None or period != cur:
+                if acc is not None:
+                    res = acc.finalize()
+                    out.append((cur, res))
+                    if on_period:
+                        on_period(cur, res)
+                if period in seen:
+                    # 檔名順序與實際時間不一致 → 同一窗被切成兩段,會產生重複期別。
+                    # 寧可大聲說,也不要靜靜輸出兩筆同日資料。
+                    raise ValueError(
+                        f"期別 {period} 重複出現:檔案未依時間排序,聚合會產生重複輸出。"
+                        f" 請檢查 {f.name} 的檔名日期是否與檔內時間一致。")
+                seen.add(period)
+                acc, cur = L3Accumulator(self.grid), period
+            acc.add(gf)
+        if acc is not None:
+            res = acc.finalize()
+            out.append((cur, res))
+            if on_period:
+                on_period(cur, res)
+        return out
+
+
+def _period_key(t: np.datetime64, freq: str) -> np.datetime64:
+    """granule 時間 → 分窗鍵(該窗的起點)。"""
+    unit = {"D": "D", "M": "M", "Y": "Y"}.get(freq.upper())
+    if unit is None:
+        raise ValueError(f"freq 只支援 D/M/Y,收到 {freq!r}")
+    return t.astype(f"datetime64[{unit}]")
+
+
+def _name_sort_key(p: Path):
+    """用檔名內的日期排序(避免為了排序先開一輪檔)。取不到就退回檔名字典序。"""
+    from src.utils.extract_datetime_from_filename import extract_datetime_from_filename
+
+    try:
+        d = extract_datetime_from_filename(p.name, to_local=False)
+    except Exception:
+        d = None
+    return (0, d.isoformat(), p.name) if d is not None else (1, "", p.name)
 
 
 class L3Accumulator:

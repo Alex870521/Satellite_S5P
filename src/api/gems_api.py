@@ -28,6 +28,8 @@ class GEMSHub(SatelliteHub):
         params = sDate / eDate / date (yyyyMMddHHmm[ss]), ver, format=json, key
         注意：路徑上的衛星段是 "GK2"，"GEMS" 是 selectVersion 查詢時用的 instrument 代碼。
     """
+
+    L3_SOURCE = "gems"
     name = "GEMS"
 
     # API endpoint

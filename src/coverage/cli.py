@@ -33,6 +33,13 @@ def main(argv=None):
                    choices=["per_file", "daily", "monthly", "yearly"])
     p.add_argument("--weight", default="count", choices=list(WEIGHTS))
     p.add_argument("--out", default=None, help="output CSV path (default: stdout summary)")
+    p.add_argument("--plot", default=None,
+                   help="also save a coverage-rate distribution PNG to this path")
+    p.add_argument("--threshold", type=float, default=0.7,
+                   help="coverage threshold (0..1) marked on the --plot histogram")
+    p.add_argument("--rep-days", default=None,
+                   help="save a representative-days map PNG (needs daily data; "
+                        "maps the processed field on one day per coverage bin)")
     p.add_argument("--base-dir", default=None,
                    help="override BASE_DIR (e.g. GEMS lives on a different drive)")
     args = p.parse_args(argv)
@@ -53,6 +60,17 @@ def main(argv=None):
     if args.out:
         df.to_csv(args.out, index=False)
         print(f"Wrote {len(df)} rows -> {args.out}")
+    if args.plot:
+        from .plot import plot_coverage_distribution
+        plot_coverage_distribution(df, args.plot, threshold=args.threshold)
+        print(f"Wrote coverage distribution -> {args.plot}")
+    if args.rep_days:
+        if args.granularity != "daily":
+            print("--rep-days needs --granularity daily.", file=sys.stderr)
+            return 1
+        from .plot import plot_representative_days
+        plot_representative_days(df, base_dir=kw.get("base_dir"), output=args.rep_days)
+        print(f"Wrote representative-days map -> {args.rep_days}")
     print(df.to_string(index=False) if len(df) <= 40 else df.describe())
     print(f"\nmean coverage = {df['coverage'].mean():.3f}  "
           f"(n={len(df)} {args.granularity} buckets, "
