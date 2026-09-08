@@ -19,7 +19,15 @@ from src.processing.l3.writer import L3Writer
 DEFAULT_BOUNDS = (119.0, 123.0, 21.0, 26.0)
 
 SHORT_NAME = {"NO2___": "no2", "O3____": "o3", "SO2___": "so2", "HCHO__": "hcho",
-              "MCD19A2": "aod", "MOD04_L2": "aod", "MYD04_L2": "aod"}
+              "MCD19A2": "aod", "MOD04_L2": "aod", "MYD04_L2": "aod",
+              # GEMS 用 catalog 的 adapter key;一個 NO2 檔含三個柱量,短名要分得開
+              "GEMS_NO2": "no2_total", "GEMS_NO2_TROP": "no2_trop",
+              "GEMS_NO2_STRAT": "no2_strat", "GEMS_O3T": "o3"}
+
+# GEMS 的 adapter key(catalog)→ 外接碟 raw 子目錄。S5P/MODIS 的 product 名本身就是目錄名,
+# GEMS 不是(一個目錄 NO2 對應三個 key),所以要這張表;CLI 與任何要找 raw 的地方共用。
+GEMS_RAW_DIR = {"GEMS_NO2": "NO2", "GEMS_NO2_TROP": "NO2", "GEMS_NO2_STRAT": "NO2",
+                "GEMS_O3T": "O3T"}
 
 
 def make_adapter(source: str, product: str):

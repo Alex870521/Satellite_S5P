@@ -12,6 +12,7 @@ ERA5 的「raw」本身就是全年檔（區域裁切、小），模型直接讀
 """
 from __future__ import annotations
 import argparse
+import calendar
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -48,9 +49,15 @@ def derive_r2m(d2m_t2m_file: Path, out_file: Path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--year", type=int, required=True)
+    ap.add_argument("--start-month", type=int, default=1)
+    ap.add_argument("--end-month", type=int, default=12,
+                    help="年份未過完時要指定，否則 CDS 會因為要到未來日期而整個失敗")
     a = ap.parse_args()
     y = a.year
-    start, end = datetime(y, 1, 1), datetime(y, 12, 31)
+    last_day = calendar.monthrange(y, a.end_month)[1]
+    start = datetime(y, a.start_month, 1)
+    end = datetime(y, a.end_month, last_day)
+    suffix = f"{start:%Y%m%d}_{end:%Y%m%d}"
 
     hub = ERA5Hub(timezone="Asia/Taipei")
     # hub 下載時自動把檔放進 single_level/<year>/ 子目錄
@@ -65,13 +72,13 @@ def main():
             hub.download_data()
 
     # 推導 r2m（從年份子目錄的 d2m_t2m）
-    dt = ydir / f"era5_sfc_d2m_t2m_{y}0101_{y}1231.nc"
+    dt = ydir / f"era5_sfc_d2m_t2m_{suffix}.nc"
     if dt.exists():
-        derive_r2m(dt, ydir / f"era5_sfc_r2m_{y}0101_{y}1231.nc")
+        derive_r2m(dt, ydir / f"era5_sfc_r2m_{suffix}.nc")
     else:
         print(f"[r2m] 找不到 {dt.name}，跳過推導")
 
-    n = len(list(ydir.glob(f"era5_sfc_*_{y}0101_{y}1231.nc")))
+    n = len(list(ydir.glob(f"era5_sfc_*_{suffix}.nc")))
     print(f"[era5] {y} 完成，{ydir} 共 {n} 檔")
 
 

@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import xarray as xr
 
 from src.processing.l3 import (GridSpec, GranuleL2, L3Accumulator, L3Pipeline,
                                L3Writer, SupersampleBinRegridder,
@@ -50,6 +51,21 @@ def _synth_granule(product="NO2___", n=40, m=30, value=1.0):
 
 
 # ----------------------------------------------------------------- 網格
+def _write_synth_gems(tmp_path):
+    """合成一個 **GEMS 版面**的 L2 nc:root 空、座標在 ``Geolocation Fields`` group、
+    資料在 ``Data Fields`` group。detect_level 只看結構,所以這樣就夠。"""
+    lat, lon = np.meshgrid(np.linspace(21.5, 25.5, 6), np.linspace(119.5, 122.5, 5),
+                           indexing="ij")
+    out = Path(tmp_path) / "GK2_GEMS_L2_synth_NO2.nc"
+    xr.Dataset().to_netcdf(out)
+    xr.Dataset({"Latitude": (("spatial", "image"), lat),
+                "Longitude": (("spatial", "image"), lon)}
+               ).to_netcdf(out, group="Geolocation Fields", mode="a")
+    xr.Dataset({"ColumnAmountNO2Trop": (("spatial", "image"), np.ones_like(lat))}
+               ).to_netcdf(out, group="Data Fields", mode="a")
+    return out
+
+
 class TestGridSpec:
     def test_from_degrees_shape(self):
         g = GridSpec.from_degrees(0.02, BOUNDS)
@@ -238,6 +254,42 @@ class TestLevelRoundTrip:
 
 
 # ----------------------------------------------------------------- 比對指標
+class TestDetectLevelGroupedFiles:
+    """座標不在 root 的 L2 檔(GEMS 的 ``Geolocation Fields``)也要認得出來。
+
+    2026-09-09 之前 detect_level 沒有這條分支:GEMS 走 L3Pipeline 會在這裡 raise,
+    而 collocate 那條路不經 build_field,所以上千天都沒踩到。用合成檔,不需外接碟。
+    """
+
+    def test_gems_layout_is_l2(self, tmp_path):
+        assert detect_level(_write_synth_gems(tmp_path)) == "L2"
+
+    def test_empty_root_without_known_group_still_raises(self, tmp_path):
+        out = Path(tmp_path) / "empty.nc"
+        xr.Dataset().to_netcdf(out)
+        with pytest.raises(ValueError):
+            detect_level(out)
+
+
+class TestGemsWiring:
+    """GEMS 的 adapter key 要同時在 catalog、SHORT_NAME、GEMS_RAW_DIR 三處對得上,
+    CLI 也不能再把目錄名當 key 吃進去(那是先前 KeyError 的來源)。"""
+
+    def test_every_gems_key_is_wired_everywhere(self):
+        from src.processing.l3.runner import GEMS_RAW_DIR, SHORT_NAME
+        for k in GEMS_RAW_DIR:
+            assert k in SHORT_NAME, k
+            assert k in PRODUCT_CONFIGS, k
+        shorts = [SHORT_NAME[k] for k in GEMS_RAW_DIR]
+        assert len(set(shorts)) == len(shorts), "同一個 NO2 檔的三個柱量短名不可相撞"
+
+    def test_cli_rejects_directory_name_for_gems(self, tmp_path):
+        from scripts.l3_regrid_year import _discover
+        with pytest.raises(SystemExit):
+            _discover("gems", "NO2", 2022, [Path(tmp_path)])
+        assert _discover("gems", "GEMS_NO2_TROP", 2022, [Path(tmp_path)]) == []
+
+
 class TestCompare:
     def test_identical_fields(self):
         a = np.random.rand(5, 4, 3)
@@ -276,11 +328,24 @@ class TestRealData:
         assert gf.value.shape == (251, 201)
 
     def test_detect_level_on_real_files(self):
-        for key in ("s5p", "modis"):
+        for key in ("s5p", "modis", "gems"):
             f = _first_sample(key)
             if f is None:
                 continue
             assert detect_level(f) == "L2"
+
+    def test_gems_through_pipeline_build_field(self):
+        """GEMS 走 L3Pipeline(不傳 level → 必經 detect_level)不得 raise。
+        這正是先前斷掉、且沒有任何測試蓋到的那條路。"""
+        from src.processing.l3.runner import make_adapter
+        f = _first_sample("gems")
+        if f is None:
+            pytest.skip("gems: 找不到樣本檔(外接碟未掛載?)")
+        pipe = L3Pipeline(make_adapter("gems", "GEMS_NO2_TROP"),
+                          SupersampleBinRegridder(K=4, qa_threshold=0.5),
+                          GridSpec.from_degrees(0.02, BOUNDS), L3Writer())
+        gf = pipe.build_field(f)
+        assert gf is None or gf.value.shape == (251, 201)
 
     # 多氣體 × 多軌:沿用 wip_l3/validate_supersample.py 的覆蓋面
     # (實測 r min 0.996 / mean 0.999;HCHO 尚未驗過,見 l3/README)

@@ -8,6 +8,14 @@ QC 結果轉成 ``qa`` 權重(通過=1、不通過=0)交給 regridder 的 ``qa_t
 QC 預設與 GEMSProcessor 一致:``FinalAlgorithmFlags == 0``(0=best,是 bitfield)+ 去負。
 AERAOD 是三波長 (nwavel, spatial, image) 且 flags 不適用 → 用 ``band`` 選波段、
 並自動關掉 flag 判斷(見 [[gems-openapi-integration]] 的坑)。
+
+⚙️ ``rms_max``:用 DOAS 擬合殘差(``RootMeanSquareError``)加篩,**預設 None=不啟用**,
+所以不影響任何既有呼叫端。設 0.005 可擋掉探測器壞列 —— 實測那條列的擬合殘差是鄰列的
+2.9–3.3 倍,而 GEMS 自己的 ``FinalAlgorithmFlags == 0`` 照樣讓它通過
+(其門檻 ``doas_fitting_residual_threshold`` 寬達 -50%~50%)。台灣框 2023 實測:
+門檻 0.005 保留 99.5% 的像元、乾淨區中位僅動 −0.3%,壞列超出量從 3.13× 壓到 1.03×。
+壞列的異常在**斜柱量就已存在**(SCD ×1.57、四個 AMF 全部 0.96–1.00),所以它是 L1/擬合
+問題,不是網格化造成的。
 """
 from __future__ import annotations
 
@@ -44,6 +52,7 @@ class GEMSAdapter:
                  qc_good_value: int = 0,
                  mask_negative: bool = True,
                  cloud_max: float | None = None,
+                 rms_max: float | None = None,
                  band: int | None = None):
         self.file_type = file_type
         self.product = PRODUCT_CONFIGS[file_type]
@@ -51,6 +60,7 @@ class GEMSAdapter:
         self.qc_good_value = qc_good_value
         self.mask_negative = mask_negative
         self.cloud_max = cloud_max
+        self.rms_max = rms_max
         self.band = band
 
     def read(self, nc_file: str | Path) -> GranuleL2 | None:
@@ -84,6 +94,10 @@ class GEMSAdapter:
                 cf = np.asarray(data["CloudFraction"].values, dtype="float64")
                 if cf.shape == val.shape:
                     ok &= np.isfinite(cf) & (cf <= self.cloud_max)
+            if self.rms_max is not None and "RootMeanSquareError" in data:
+                rms = np.asarray(data["RootMeanSquareError"].values, dtype="float64")
+                if rms.shape == val.shape:
+                    ok &= np.isfinite(rms) & (rms <= self.rms_max)
 
             if not ok.any():
                 return None

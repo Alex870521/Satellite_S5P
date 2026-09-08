@@ -172,3 +172,9 @@ wip*
 data/TEMIS_UV/
 data/shapefiles/ne_10m_admin_0_countries_twn/
 data/shapefiles/China/gadm36_CHN_[123].*
+
+# CodeGraph local index (rebuildable via `codegraph init`)
+.codegraph/
+
+# Claude Code project dir (worktrees + local settings)
+.claude/

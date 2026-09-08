@@ -8,6 +8,7 @@
 用法:
     python -m scripts.l3_regrid_year --source s5p --product NO2___ --year 2024
     python -m scripts.l3_regrid_year --source modis --product MCD19A2 --year 2023
+    python -m scripts.l3_regrid_year --source gems  --product GEMS_NO2_TROP --year 2022
     python -m scripts.l3_regrid_year --source s5p --product SO2___ --year 2024 --deg 0.02 --dry-run
 
 設計取捨:
@@ -28,13 +29,12 @@ import numpy as np
 
 from src.processing.l3 import (GridSpec, L3Pipeline, L3Writer,
                                SupersampleBinRegridder)
+from src.processing.l3.runner import GEMS_RAW_DIR, SHORT_NAME
 
 BOUNDS = (119.0, 123.0, 21.0, 26.0)
 LOCAL_WORK = Path("/Users/chanchihyu/Satellite/Data")
 
 # source → (raw glob 樣板, adapter 工廠, 輸出短變數名)
-SHORT_NAME = {"NO2___": "no2", "O3____": "o3", "SO2___": "so2", "HCHO__": "hcho",
-              "MCD19A2": "aod", "MOD04_L2": "aod", "MYD04_L2": "aod"}
 PREFIX = {"s5p": "S5P", "modis": "MODIS", "gems": "GEMS"}
 
 
@@ -48,7 +48,14 @@ def _discover(source: str, product: str, year: int, base_dirs: list[Path]) -> li
             pats.append(str(b / "MODIS" / "raw" / product / str(year) / "*" / "*.hdf"))
             pats.append(str(b / "MODIS" / "raw" / product / str(year) / "*" / "*.nc"))
         elif source == "gems":
-            pats.append(str(b / "GEMS" / "raw" / product / str(year) / "*" / "*.nc"))
+            # ⚠️ GEMS 的 --product 是 adapter key(GEMS_NO2_TROP…),不是目錄名;
+            # 同一個 NO2 目錄對應三個 key,所以目錄從 GEMS_RAW_DIR 推。
+            sub = GEMS_RAW_DIR.get(product)
+            if sub is None:
+                raise SystemExit(
+                    f"GEMS 的 --product 要給 adapter key,可用:{sorted(GEMS_RAW_DIR)};"
+                    f"得到 {product!r}(若你想的是目錄 NO2,請改用 GEMS_NO2_TROP / GEMS_NO2 / GEMS_NO2_STRAT)")
+            pats.append(str(b / "GEMS" / "raw" / sub / str(year) / "*" / "*.nc"))
     out = []
     for p in pats:
         out += [Path(f) for f in glob.glob(p) if not Path(f).name.startswith("._")]
@@ -71,7 +78,10 @@ def _make_adapter(source: str, product: str):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True, choices=["s5p", "modis", "gems"])
-    ap.add_argument("--product", required=True, help="S5P: NO2___/O3____/SO2___;MODIS: MCD19A2")
+    ap.add_argument("--product", required=True,
+                    help="S5P: NO2___/O3____/SO2___;MODIS: MCD19A2;"
+                         "GEMS: adapter key GEMS_NO2_TROP / GEMS_NO2 / GEMS_NO2_STRAT / GEMS_O3T"
+                         "(目錄自動推,一個 NO2 檔含三個柱量所以用 key 選)")
     ap.add_argument("--year", type=int, required=True)
     ap.add_argument("--deg", type=float, default=0.02, help="目標網格度數(預設 0.02 = 模型網格)")
     ap.add_argument("--freq", default="D", choices=["D", "M", "Y"])

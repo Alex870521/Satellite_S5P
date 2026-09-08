@@ -5,7 +5,8 @@
 
   * lat/lon 為 **1D 單調座標** → 規則網格 → ``"L3"``
   * lat/lon 為 **2D**、或有 ``scanline``/``ground_pixel`` 維、或資料藏在
-    ``PRODUCT`` group(S5P L2)→ swath → ``"L2"``
+    ``PRODUCT`` group(S5P L2)、或座標藏在 ``Geolocation Fields`` group
+    (GEMS L2:``Latitude``/``Longitude`` 2D)→ swath → ``"L2"``
 
 唯一的副檔名特例是 **HDF4**(``.hdf``):xarray 開不了,而本套件裡的 HDF4 一律是
 MODIS swath/tile 原始檔,沒有已格網化的 HDF4 來源 → 直接判 ``"L2"``。
@@ -54,6 +55,22 @@ def detect_level(nc_file: str | Path) -> str:
         g = xr.open_dataset(nc_file, group="PRODUCT")
         g.close()
         return "L2"
+    except Exception:
+        pass
+
+    # GEMS L2:root 空的,座標在 "Geolocation Fields" group(Latitude/Longitude 2D)。
+    # ⚠️ 這條沒有時 GEMS 走 L3Pipeline 會在這裡 raise;collocate 那條路不經 build_field
+    # 所以先前上千天都沒踩到。1D 就當已格網化的 L3(目前沒有這種 GEMS 檔,留個對稱)。
+    try:
+        g = xr.open_dataset(nc_file, group="Geolocation Fields")
+        try:
+            names = set(g.variables) | set(g.coords)
+            has = {"Latitude", "Longitude"} <= names
+            nd = int(g["Latitude"].ndim) if has else 0
+        finally:
+            g.close()
+        if has:
+            return "L2" if nd >= 2 else "L3"
     except Exception:
         pass
 
