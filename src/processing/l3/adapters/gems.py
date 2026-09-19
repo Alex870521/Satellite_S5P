@@ -19,7 +19,6 @@ AERAOD 是三波長 (nwavel, spatial, image) 且 flags 不適用 → 用 ``band`
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Iterable, Iterator
 
@@ -28,20 +27,18 @@ import xarray as xr
 
 from src.config.catalog import PRODUCT_CONFIGS
 from src.processing.l3.granule import GranuleL2
+from src.utils.extract_datetime_from_filename import extract_datetime_from_filename
 
 DATA_GROUP = "Data Fields"
 GEO_GROUP = "Geolocation Fields"
 
-# GK2_GEMS_L2_20230515_0045_NO2_..._.nc
-_DT_RE = re.compile(r"_(\d{8})_(\d{4})_")
-
-
 def _time_from_name(name: str) -> np.datetime64 | None:
-    m = _DT_RE.search(name)
-    if not m:
+    """GK2_GEMS_L2_20230515_0045_NO2_..._.nc → UTC 時間;委派給共用解析器(C12),無效日期回 None。"""
+    try:
+        d = extract_datetime_from_filename(name, to_local=False)
+    except ValueError:
         return None
-    d, hm = m.group(1), m.group(2)
-    return np.datetime64(f"{d[:4]}-{d[4:6]}-{d[6:8]}T{hm[:2]}:{hm[2:]}", "ns")
+    return np.datetime64(d, "ns") if d is not None else None
 
 
 class GEMSAdapter:

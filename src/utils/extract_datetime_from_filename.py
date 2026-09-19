@@ -21,8 +21,11 @@ def extract_datetime_from_filename(filename, to_local=True, local_tz='Asia/Taipe
     # Sentinel-5P 格式
     # 匹配格式: S5P_OFFL_L2__HCHO___20241231T033759_...
     # 產品類型部分可能有多個下劃線，需要更靈活的匹配
-    # 確保匹配到第一個日期時間（開始時間）
-    s5p_match = re.search(r'S5P_\w+_\w+__\w+_+(\d{8}T\d{6})_', filename)
+    # 確保匹配到第一個日期時間（開始時間）。
+    # ⚠️ 舊版 r'S5P_\w+_\w+__\w+_+(\d{8}T\d{6})_' 因 \w 含底線、貪婪回溯從最長開始,
+    #    實際抓到的是**結束時間**(tests/test_utils_names.py 釘住)。改非貪婪並明確要求
+    #    「_開始_結束_」兩個時間,group(1) 才保證是開始時間。
+    s5p_match = re.search(r'S5P_\w+?_\w+?__\w+?_+(\d{8}T\d{6})_(\d{8}T\d{6})_', filename)
     if s5p_match:
         date_str = s5p_match.group(1)
         date_obj = datetime.strptime(date_str, '%Y%m%dT%H%M%S')

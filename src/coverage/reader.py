@@ -18,6 +18,7 @@ import pandas as pd
 import xarray as xr
 
 from src.config.settings import BASE_DIR
+from src.utils.nc_names import pick_name as _pick
 from .base import Slice
 from .registry import HubSpec, get_spec
 
@@ -25,13 +26,6 @@ from .registry import HubSpec, get_spec
 def _is_real_nc(path: str) -> bool:
     """Skip macOS AppleDouble sidecars (``._foo.nc``) that litter the drive."""
     return not os.path.basename(path).startswith("._")
-
-
-def _pick(ds: xr.Dataset, names: tuple) -> str | None:
-    for n in names:
-        if n in ds.variables or n in ds.coords:
-            return n
-    return None
 
 
 class GriddedNCReader:

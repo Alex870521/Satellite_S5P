@@ -17,6 +17,9 @@ import numpy as np
 from src.processing.l3.granule import GranuleL2, GridSpec, GriddedField
 from src.processing.l3.ingest import ingest_l3
 from src.processing.l3.level import detect_level
+import logging
+
+_log = logging.getLogger(__name__)
 from src.processing.l3.writer import L3Writer
 
 
@@ -132,11 +135,17 @@ def _name_sort_key(p: Path):
     """用檔名內的日期排序(避免為了排序先開一輪檔)。取不到就退回檔名字典序。"""
     from src.utils.extract_datetime_from_filename import extract_datetime_from_filename
 
+    exc = None
     try:
         d = extract_datetime_from_filename(p.name, to_local=False)
-    except Exception:
-        d = None
-    return (0, d.isoformat(), p.name) if d is not None else (1, "", p.name)
+    except Exception as e:
+        d, exc = None, e
+    if d is None:
+        # 退回字典序不是錯,但要出聲:同批多檔如此時,aggregate 的重複期別保護會 raise,
+        # 沒有這行 warning 使用者只會看到一個不知從何而來的 ValueError。
+        _log.warning("排序退化:%s 取不到檔名日期(%s),退回字典序", p.name, exc or "無日期樣式")
+        return (1, "", p.name)
+    return (0, d.isoformat(), p.name)
 
 
 class L3Accumulator:

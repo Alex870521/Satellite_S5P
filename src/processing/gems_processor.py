@@ -8,7 +8,6 @@ GEMS 原始檔結構（GK2_GEMS_L2_*.nc，HDF5 群組）：
     METADATA/
 經緯度與資料同為 2D swath（如 2048 x 695）。
 """
-import re
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -20,18 +19,19 @@ from src.processing.interpolators import DataInterpolator
 from src.processing.grid_frame import GridFrame
 from src.config.settings import FIGURE_BOUNDARY
 from src.config.catalog import ProductConfig
+from src.utils.extract_datetime_from_filename import extract_datetime_from_filename
 from src.visualization.plot_nc import plot_global_var
 from src.visualization.gif import animate_data
 
 
 def gems_datetime_from_filename(filename: str) -> datetime | None:
-    """GK2_GEMS_L2_20230515_0345_NO2_FW_DPRO_ORI.nc -> datetime(2023,5,15,3,45)（UTC）"""
-    m = re.search(r'_(\d{8})_(\d{4})_', filename)
-    if m:
-        try:
-            return datetime.strptime(m.group(1) + m.group(2), '%Y%m%d%H%M')
-        except ValueError:
-            return None
+    """GK2_GEMS_L2_20230515_0345_NO2_FW_DPRO_ORI.nc -> datetime(2023,5,15,3,45)（UTC）。
+    委派給共用的 ``extract_datetime_from_filename``(C12:三份相同 regex 收斂成一份);
+    無效日期維持回 None 的既有契約。"""
+    try:
+        return extract_datetime_from_filename(filename, to_local=False)
+    except ValueError:
+        return None
     return None
 
 

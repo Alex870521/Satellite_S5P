@@ -189,7 +189,9 @@ def plot_global_var(dataset: xr.Dataset | Path | str,
         # 判斷輸入類型並適當處理
         from netCDF4 import Dataset
         if isinstance(dataset, (str, Path)):
-            if 'PRODUCT' in Dataset(dataset, 'r').groups:
+            with Dataset(dataset, 'r') as _probe:          # 用完即關,逐檔迴圈不累積 fd
+                has_product = 'PRODUCT' in _probe.groups
+            if has_product:
                 ds = xr.open_dataset(dataset, engine='netcdf4', group='PRODUCT')
             else:
                 ds = xr.open_dataset(dataset, engine='netcdf4')

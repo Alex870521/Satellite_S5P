@@ -125,7 +125,8 @@ data/processed/MCD19A2/MCD19A2_merged_20240101_20240331.nc
 
 ## 示例腳本
 
-參見 `examples/merge_modis_hdf_example.py` 了解完整的使用示例。
+> ⚠️ 原示例腳本 `examples/merge_modis_hdf_example.py` 已於 commit 55c4c5d 移除。
+> 現行入口是 `src/processing/modis_processor.py` 的 `merge_hdf_files_to_netcdf`。
 
 ## 注意事項
 

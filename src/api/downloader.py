@@ -58,6 +58,9 @@ class DownloadManifest:
         return [k for k, v in self._data.items() if v.get('status') != 'complete']
 
 
+STREAM_TIMEOUT = (30, 120)   # (連線, 讀取) 秒
+
+
 class Downloader:
     def __init__(self, manifest_dir: Path = None):
         self.session = requests.Session()
@@ -128,7 +131,11 @@ class Downloader:
             request_headers['Range'] = f'bytes={downloaded}-'
             logger.info(f"Resuming download from {downloaded} bytes: {temp_path.name}")
 
-        response = self.session.get(url, headers=request_headers, stream=True)
+        # ⚠️ 一定要設逾時:沒有的話,連線靜默卡住時 iter_content 會永遠等下去,
+        # 外層的重試永遠不會觸發(2026-09-17 實際卡死 3 條 S5P 下載一小時以上)。
+        # read timeout 是「兩次收到資料之間」的上限,不是整檔下載時間。
+        response = self.session.get(url, headers=request_headers, stream=True,
+                                    timeout=STREAM_TIMEOUT)
 
         # 206 = partial content (resume), 200 = full content (server doesn't support Range)
         if response.status_code == 200 and downloaded > 0:

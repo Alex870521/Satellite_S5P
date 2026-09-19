@@ -56,6 +56,9 @@ processor = MODISProcessor(aod_variable='Image_Optical_Depth_Land_And_Ocean')
 
 ### 方法 2: 使用合併腳本
 
+> ⚠️ 本節的 `merge_data/MODIS/` 目錄與 `merge_modis_hdf_example.py` 已於 commit 55c4c5d 移除,以下指令**已失效**。
+> 現行入口:`from src.processing.modis_processor import MODISProcessor` → `merge_hdf_files_to_netcdf`。
+
 ```bash
 cd merge_data/MODIS
 python merge_modis_hdf_example.py

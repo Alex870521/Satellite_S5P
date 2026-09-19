@@ -122,7 +122,7 @@ km 模式保留不動(回歸未破)。
 
 **測試 → `tests/test_l3.py`**
 ```bash
-pytest tests/test_l3.py -m "not requires_data"   # 純邏輯,不需外接碟,CI 可跑(21 項)
+pytest tests/test_l3.py -m "not requires_data"   # 純邏輯,不需外接碟,CI 可跑(全套 32 項)
 pytest tests/test_l3.py -m requires_data         # 三 source 讀真檔 + HARP oracle 對答案
 ```
 需要外接碟/HARP 的會自動 skip 而非失敗。純邏輯層用合成資料驗:網格精確性、

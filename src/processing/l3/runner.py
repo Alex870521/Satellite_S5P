@@ -55,7 +55,7 @@ def regrid_to_series(source: str, product: str, files: Iterable[str | Path],
                      progress=None) -> dict:
     """一批 raw → 統一網格的 ``(time, lat, lon)`` nc。
 
-    回傳統計 dict(``n_files``/``n_periods``/``mean_coverage``/``out``/``seconds``)。
+    回傳統計 dict(``n_files``/``n_periods``/``n_skipped``/``mean_coverage``/``out``/``seconds``)。
     """
     files = [Path(f) for f in files]
     if not files:
@@ -67,19 +67,30 @@ def regrid_to_series(source: str, product: str, files: Iterable[str | Path],
                       grid, L3Writer())
 
     t0 = time.time()
-    res = pipe.aggregate(files, freq=freq, progress=progress)
+    skipped = 0
+
+    def _progress(f, gf):                       # 包一層:runner 自己數略過的檔,呼叫端回呼照常
+        nonlocal skipped
+        if gf is None:
+            skipped += 1
+        if progress:
+            progress(f, gf)
+
+    res = pipe.aggregate(files, freq=freq, progress=_progress)
     if not res:
         raise ValueError(f"{source}/{product}: 聚合結果為空(所有 granule 都無有效資料)")
 
     periods = [p for p, _ in res]
     results = [r for _, r in res]
     attrs = {"source": source, "product": product,
-             "n_source_files": str(len(files)), "qa_threshold": str(qa),
+             "n_source_files": str(len(files)), "n_skipped": str(skipped),
+             "qa_threshold": str(qa),
              "supersample_K": str(K), "freq": freq}
     attrs.update(extra_attrs or {})
     out = L3Writer().write_series(periods, results, grid, adapter.product, out_path,
                                   short_name=short_name or SHORT_NAME.get(product),
                                   extra_attrs=attrs)
     cov = float(np.mean([np.isfinite(r["value"]).mean() for r in results]) * 100)
-    return {"n_files": len(files), "n_periods": len(res), "mean_coverage": cov,
+    return {"n_files": len(files), "n_periods": len(res), "n_skipped": skipped,
+            "mean_coverage": cov,
             "out": out, "seconds": time.time() - t0}

@@ -62,7 +62,7 @@ Before using this toolkit, you need to complete the following steps:
      COPERNICUS_PASSWORD=your_password
      
      # ERA5 credentials
-     CDSAPI_URL=https://cds.climate.copernicus.eu/api/v2
+     CDSAPI_URL=https://cds.climate.copernicus.eu/api
      CDSAPI_KEY=your_key
      
      # NASA Earthdata credentials
@@ -142,7 +142,8 @@ from datetime import datetime
 from src.api import SENTINEL5PHub
 
 # file_class: 'NRTI' (Near Real-Time) or 'OFFL' (Offline processed)
-# file_type:  'NO2___', 'O3____', 'CO____', 'SO2___', 'CH4___', 'CLOUD_', 'AER_AI'
+# file_type:  'NO2___', 'O3____', 'CO____', 'SO2___', 'CH4___', 'AER_AI'
+#             ('CLOUD_' / 'FRESCO' / 'AER_LH' can be downloaded but have no processing config yet)
 sentinel_hub = SENTINEL5PHub(max_workers=3)
 sentinel_hub.run_pipeline(
     file_class='NRTI',
@@ -242,7 +243,7 @@ gems_hub.run_pipeline(
 | CO | `CO____` | 5.5 × 7 | Total column |
 | CH₄ | `CH4___` | 5.5 × 7 | Column-averaged mixing ratio |
 | Aerosol Index | `AER_AI` | 5.5 × 3.5 | UV aerosol index |
-| Cloud | `CLOUD_` | 5.5 × 3.5 | Cloud fraction / properties |
+| Cloud | `CLOUD_` | 5.5 × 3.5 | Cloud fraction / properties — **download only, processing not yet configured** |
 
 > Nadir resolution is 5.5 × 3.5 km since 2019-08-06 (7 × 3.5 km before).
 
@@ -291,6 +292,9 @@ Per-source and topic guides live under [`docs/`](docs/):
 - [Himawari API](docs/Himawari_API_README.md) — products & usage *(mock; not yet wired to a real service)*
 - [MODIS AOD variables](docs/MODIS_AOD_Variables_README.md) — AOD variable reference
 - [MODIS HDF → NetCDF merge](docs/MODIS_HDF_Merge_README.md) — raw `.hdf` ingest/merge notes
+- [Unified L3 regrid pipeline](src/processing/l3/README.md) — footprint supersampling to one 0.02° grid for all sources (`process_l3()` / `scripts/l3_regrid_year.py`)
+- [Coverage toolkit](src/coverage/README.md) — region × time coverage statistics across satellites
+- [Merge](src/merge/README.md) — stack hourly processed files into `(time, lat, lon)` series
 
 ## <div align="center">Processing Pipeline</div>
 
@@ -332,8 +336,8 @@ Resulting tree:
 
 ```
 $SATELLITE_BASE_DIR/
-├── Sentinel-5P/ { raw, processed, figure, geotiff, logs }/<product>/<YYYY>/<MM>/
-├── MODIS/       { raw, processed, figure, logs }/<product>/<YYYY>/<MM>/
+├── Sentinel-5P/ { raw, processed, figure }/L2/<product>/<YYYY>/<MM>/   (note the extra L2/ level; logs/ is flat)
+├── MODIS/       { raw, figure, logs }/<product>/<YYYY>/<MM>/   processed/<product>/ is flat (no year/month dirs)
 ├── ERA5/        { raw, processed, figure, logs }/...
 └── GEMS/        { raw, processed, figure, logs }/<product>/<YYYY>/<MM>/
     ├── raw/       NO2/2023/05/GK2_GEMS_L2_20230515_0345_NO2_..._.nc   ← downloaded swath

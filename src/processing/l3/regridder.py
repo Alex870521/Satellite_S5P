@@ -14,6 +14,9 @@ from scipy.stats import binned_statistic_2d
 
 from src.processing.interpolators import DataInterpolator
 from src.processing.l3.granule import GranuleL2, GridSpec, GriddedField
+import logging
+
+_log = logging.getLogger(__name__)
 
 
 def corners_from_centers(a: np.ndarray) -> np.ndarray:
@@ -65,7 +68,9 @@ class SupersampleBinRegridder:
         try:
             latp = g.lat_corners if g.lat_corners is not None else corners_from_centers(lat)
             lonp = g.lon_corners if g.lon_corners is not None else corners_from_centers(lon)
-        except ValueError:
+        except ValueError as exc:
+            # 出聲(debug 級:GEMS 裁切條帶是已知且預期的),否則統計上與「當天無觀測」無法區分
+            _log.debug("角點推導失敗,回傳空場:%s shape=%s(%s)", g.file_name, lat.shape, exc)
             return GriddedField(np.full((nlat, nlon), np.nan), np.zeros((nlat, nlon)),
                                 grid, g.product, g.time, g.source, g.file_name, "supersample")
 
@@ -140,7 +145,10 @@ class SupersampleBinRegridder:
 class RbfRegridder:
     """可選平滑/看圖 mode:沿用既有 DataInterpolator(rbf/griddata/kdtree)。"""
 
-    def __init__(self, method: str = "rbf", max_distance: float = 0.1, rbf_function: str = "thin_plate"):
+    def __init__(self, method: str = "rbf", max_distance: float = 0.1, rbf_function: str = "thin_plate",
+                 qa_threshold: float = 0.5):
+        # qa_threshold 與 SupersampleBinRegridder 對稱;預設 0.5 維持既有行為(研究預設,不動)
+        self.qa_threshold = qa_threshold
         self.method = method
         self.max_distance = max_distance
         self.rbf_function = rbf_function
@@ -148,7 +156,7 @@ class RbfRegridder:
     def regrid(self, g: GranuleL2, grid: GridSpec) -> GriddedField:
         lon_grid, lat_grid = np.meshgrid(grid.lon, grid.lat)
         qa = g.qa if g.qa is not None else np.ones_like(g.values, dtype=float)
-        val = np.where(qa >= 0.5, g.values, np.nan)
+        val = np.where(qa >= self.qa_threshold, g.values, np.nan)
         value = DataInterpolator.interpolate(
             g.lon, g.lat, val, lon_grid, lat_grid,
             method=self.method, max_distance=self.max_distance, rbf_function=self.rbf_function,

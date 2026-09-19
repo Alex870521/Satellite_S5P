@@ -16,17 +16,11 @@ import numpy as np
 import xarray as xr
 
 from src.config.catalog import ProductConfig
+from src.utils.nc_names import pick_name as _pick
 from src.processing.l3.granule import GridSpec, GriddedField
 
 _LAT_NAMES = ("latitude", "lat")
 _LON_NAMES = ("longitude", "lon")
-
-
-def _pick(ds: xr.Dataset, names: tuple) -> str | None:
-    for n in names:
-        if n in ds.variables or n in ds.coords:
-            return n
-    return None
 
 
 def _resolve_var(ds: xr.Dataset, product: ProductConfig) -> str:

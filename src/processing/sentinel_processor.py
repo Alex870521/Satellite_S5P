@@ -458,7 +458,11 @@ class SentinelProcessor:
                             continue
 
                         processed_files.append(file_path)
-                    except:
+                    except Exception as exc:
+                        # 多半是檔名解析不到日期 → None 與 datetime 比較的 TypeError;
+                        # 靜靜跳過會讓使用者只看到「No processed files found」
+                        if self.logger:
+                            self.logger.warning(f"略過 {file_path.name}:{exc!r}")
                         continue
 
             if not processed_files:
@@ -808,6 +812,12 @@ class SentinelProcessor:
             )
 
             # 4. 創建數據集
+            if self.file_type not in PRODUCT_CONFIGS:
+                # CLOUD_/FRESCO/AER_LH 在 PRODUCT_TYPES(可下載)卻不在 PRODUCT_CONFIGS(可處理):
+                # 與其在這裡 KeyError,不如講清楚是哪一種缺。
+                raise ValueError(
+                    f"{self.file_type!r} 可下載但尚未設定處理參數(PRODUCT_CONFIGS 沒有這個 key)。"
+                    f" 可處理的產品:{sorted(PRODUCT_CONFIGS)}")
             return xr.Dataset(
                 {
                     PRODUCT_CONFIGS[self.file_type].dataset_name: (

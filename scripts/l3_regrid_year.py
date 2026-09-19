@@ -20,18 +20,16 @@ from __future__ import annotations
 
 import argparse
 import glob
-import os
 import sys
 import time
 from pathlib import Path
 
-import numpy as np
 
-from src.processing.l3 import (GridSpec, L3Pipeline, L3Writer,
-                               SupersampleBinRegridder)
-from src.processing.l3.runner import GEMS_RAW_DIR, SHORT_NAME
+from src.processing.l3.runner import (DEFAULT_BOUNDS, GEMS_RAW_DIR, SHORT_NAME,
+                                      regrid_to_series)
 
-BOUNDS = (119.0, 123.0, 21.0, 26.0)
+# 外接碟根目錄;測試用 monkeypatch 換掉
+BASE_DIRS = [Path("/Volumes/Transcend"), Path("/Volumes/TOSHIBA")]
 LOCAL_WORK = Path("/Users/chanchihyu/Satellite/Data")
 
 # source → (raw glob 樣板, adapter 工廠, 輸出短變數名)
@@ -62,19 +60,6 @@ def _discover(source: str, product: str, year: int, base_dirs: list[Path]) -> li
     return sorted(set(out))
 
 
-def _make_adapter(source: str, product: str):
-    if source == "s5p":
-        from src.processing.l3 import S5PAdapter
-        return S5PAdapter(product)
-    if source == "modis":
-        from src.processing.l3 import MODISAdapter
-        return MODISAdapter(product)
-    if source == "gems":
-        from src.processing.l3 import GEMSAdapter
-        return GEMSAdapter(product)
-    raise ValueError(f"未知 source: {source}")
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True, choices=["s5p", "modis", "gems"])
@@ -92,12 +77,10 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
 
-    base_dirs = [Path("/Volumes/Transcend"), Path("/Volumes/TOSHIBA")]
-    base_dirs = [b for b in base_dirs if b.exists()]
+    base_dirs = [b for b in BASE_DIRS if b.exists()]
     if not base_dirs:
         print("找不到任何外接碟(Transcend/TOSHIBA)", file=sys.stderr)
         return 2
-
     files = _discover(a.source, a.product, a.year, base_dirs)
     if a.limit:
         files = files[: a.limit]
@@ -110,17 +93,13 @@ def main(argv=None):
     out = Path(a.out) if a.out else (
         LOCAL_WORK / f"{PREFIX[a.source]}_{SHORT_NAME.get(a.product, a.product)}"
                      f"_l3_{tag}deg_{a.year}.nc")
-    print(f"[l3] 目標網格 {a.deg}° bounds={BOUNDS}  freq={a.freq}  K={a.K}", flush=True)
+    print(f"[l3] 目標網格 {a.deg}° bounds={DEFAULT_BOUNDS}  freq={a.freq}  K={a.K}", flush=True)
     print(f"[l3] 輸出 → {out}", flush=True)
     if a.dry_run:
         print("[l3] --dry-run,結束。")
         return 0
 
-    grid = GridSpec.from_degrees(a.deg, BOUNDS)
-    adapter = _make_adapter(a.source, a.product)
-    regridder = SupersampleBinRegridder(K=a.K, qa_threshold=a.qa)
-    pipe = L3Pipeline(adapter, regridder, grid, L3Writer())
-
+    # 編排全部交給 runner.regrid_to_series(B5 收斂):CLI 只負責找檔、命名、印進度。
     t0 = time.time()
     done = {"n": 0, "skip": 0}
 
@@ -133,24 +112,19 @@ def main(argv=None):
             print(f"  {done['n']}/{len(files)}  略過 {done['skip']}  "
                   f"{el:.0f}s ({el/done['n']:.2f}s/檔)", flush=True)
 
-    res = pipe.aggregate(files, freq=a.freq, progress=progress)
-    if not res:
-        print("[l3] 聚合結果為空(所有 granule 都無有效資料)", file=sys.stderr)
+    try:
+        stats = regrid_to_series(
+            a.source, a.product, files, out,
+            deg=a.deg, bounds=DEFAULT_BOUNDS, freq=a.freq, K=a.K, qa=a.qa,
+            short_name=SHORT_NAME.get(a.product),
+            extra_attrs={"year": str(a.year)},
+            progress=progress,
+        )
+    except ValueError as exc:                       # 聚合結果為空
+        print(f"[l3] {exc}", file=sys.stderr)
         return 1
-
-    periods = [p for p, _ in res]
-    results = [r for _, r in res]
-    L3Writer().write_series(
-        periods, results, grid, adapter.product, out,
-        short_name=SHORT_NAME.get(a.product),
-        extra_attrs={"source": a.source, "product": a.product, "year": str(a.year),
-                     "n_source_files": str(len(files)),
-                     "n_skipped": str(done["skip"]),
-                     "qa_threshold": str(a.qa), "supersample_K": str(a.K)},
-    )
-    cov = np.mean([np.isfinite(r["value"]).mean() for r in results]) * 100
-    print(f"[l3] 完成:{len(res)} 個 {a.freq} 窗,平均逐窗覆蓋 {cov:.1f}%,"
-          f"耗時 {time.time()-t0:.0f}s → {out}", flush=True)
+    print(f"[l3] 完成:{stats['n_periods']} 個 {a.freq} 窗,平均逐窗覆蓋 {stats['mean_coverage']:.1f}%,"
+          f"略過 {stats['n_skipped']} 檔,耗時 {stats['seconds']:.0f}s → {stats['out']}", flush=True)
     return 0
 
 

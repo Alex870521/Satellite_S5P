@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "s5p-processor"
+name = "satellite-s5p"
 version = "0.1.0"
 description = "Sentinel-5P 資料處理與視覺化工具"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
-    { name = "Your Name", email = "your.email@example.com" }
+    { name = "Alex870521", email = "alex870521@gmail.com" }
 ]
 
 dependencies = [
@@ -57,8 +57,9 @@ dev = [
     "pytest>=8.3.0",
 ]
 
-[tool.setuptools]
-packages = ["src"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

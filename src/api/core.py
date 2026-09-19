@@ -201,8 +201,9 @@ class SatelliteHub(ABC):
         try:
             # Use provided timezone or attempt to get system timezone
             self.timezone = ZoneInfo(timezone) if timezone else ZoneInfo(str(datetime.now().astimezone().tzinfo))
-        except:
-            # If failed, use UTC
+        except Exception as exc:
+            # If failed, use UTC — but say so; a silently wrong timezone shifts every timestamp
+            logging.getLogger(__name__).warning("時區 %r 無效(%s),改用 UTC", timezone, exc)
             self.timezone = ZoneInfo('UTC')
 
         # Calculate timezone offset (hours)
@@ -250,8 +251,9 @@ class SatelliteHub(ABC):
                 # Try to get system timezone
                 try:
                     tz_info = datetime.now().astimezone().tzinfo
-                except:
+                except Exception as exc:
                     # If unable to get system timezone, use UTC
+                    logging.getLogger(__name__).warning("取不到系統時區(%s),改用 UTC", exc)
                     from datetime import timezone
                     tz_info = timezone.utc
 
