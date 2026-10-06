@@ -117,6 +117,9 @@ class GranuleL2:
     lon/lat/values 皆為 2D (scanline, ground_pixel) 像元中心。
     lon_corners/lat_corners 為可選的 (n+1, m+1) footprint 角點;若 None,
     regridder 會從中心推導(中心→角誤差 ~0.1% 像元半徑,已驗證)。
+    scan_time 為可選的逐掃描線時間 (n,);有給時 pipeline 會把 ``time`` 改成
+    「落在目標網格內那幾條掃描線的平均時刻」= 真正的過境時間(S5P 的 ``time`` 只是
+    當天 00:00 UTC 的參考時間,逐軌輸出需要這個)。
     """
 
     values: np.ndarray
@@ -129,6 +132,7 @@ class GranuleL2:
     lat_corners: np.ndarray | None = None
     source: str = ""
     file_name: str = ""
+    scan_time: np.ndarray | None = None
 
 
 @dataclass

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 from typing import Iterable
@@ -32,7 +33,16 @@ GEMS_RAW_DIR = {"GEMS_NO2": "NO2", "GEMS_NO2_TROP": "NO2", "GEMS_NO2_STRAT": "NO
                 "GEMS_AERAOD": "AERAOD", "GEMS_UVI": "UVI"}
 
 
-def make_adapter(source: str, product: str):
+_GEMS_SLOT = re.compile(r"_\d{8}_(\d{4})_")
+
+
+def gems_slot(name: str) -> str | None:
+    """GEMS 檔名的時槽(UTC HHMM),例 ``GK2_GEMS_L2_20220101_0445_NO2_…`` → ``"0445"``。"""
+    m = _GEMS_SLOT.search(name)
+    return m.group(1) if m else None
+
+
+def make_adapter(source: str, product: str, **adapter_kwargs):
     """source 名 → adapter 實例。"""
     source = source.lower()
     if source in ("s5p", "sentinel5p"):
@@ -43,7 +53,7 @@ def make_adapter(source: str, product: str):
         return MODISAdapter(product)
     if source == "gems":
         from src.processing.l3.adapters import GEMSAdapter
-        return GEMSAdapter(product)
+        return GEMSAdapter(product, **adapter_kwargs)
     raise ValueError(f"未知 source: {source!r}")
 
 
@@ -54,17 +64,22 @@ def regrid_to_series(source: str, product: str, files: Iterable[str | Path],
                      freq: str = "D", K: int = 4, qa: float = 0.5,
                      short_name: str | None = None,
                      extra_attrs: dict | None = None,
-                     progress=None) -> dict:
+                     progress=None,
+                     adapter_kwargs: dict | None = None,
+                     tz_offset_hours: float = 0) -> dict:
     """一批 raw → 統一網格的 ``(time, lat, lon)`` nc。
 
     回傳統計 dict(``n_files``/``n_periods``/``n_skipped``/``mean_coverage``/``out``/``seconds``)。
+
+    ``adapter_kwargs``:傳給 adapter 的品質篩選參數(GEMS:``cloud_max`` / ``rms_max``)。
+    ``tz_offset_hours``:分窗用的時區位移(GEMS 用 8 = 台灣當地日期)。
     """
     files = [Path(f) for f in files]
     if not files:
         raise FileNotFoundError(f"{source}/{product}: 沒有可處理的 raw 檔")
 
     grid = GridSpec.from_degrees(deg, bounds)
-    adapter = make_adapter(source, product)
+    adapter = make_adapter(source, product, **(adapter_kwargs or {}))
     pipe = L3Pipeline(adapter, SupersampleBinRegridder(K=K, qa_threshold=qa),
                       grid, L3Writer())
 
@@ -78,7 +93,7 @@ def regrid_to_series(source: str, product: str, files: Iterable[str | Path],
         if progress:
             progress(f, gf)
 
-    res = pipe.aggregate(files, freq=freq, progress=_progress)
+    res = pipe.aggregate(files, freq=freq, progress=_progress, tz_offset_hours=tz_offset_hours)
     if not res:
         raise ValueError(f"{source}/{product}: 聚合結果為空(所有 granule 都無有效資料)")
 
@@ -87,7 +102,14 @@ def regrid_to_series(source: str, product: str, files: Iterable[str | Path],
     attrs = {"source": source, "product": product,
              "n_source_files": str(len(files)), "n_skipped": str(skipped),
              "qa_threshold": str(qa),
-             "supersample_K": str(K), "freq": freq}
+             "supersample_K": str(K), "freq": freq,
+             "date_basis": f"UTC{tz_offset_hours:+g}h" if tz_offset_hours else "UTC"}
+    if freq.lower() in ("granule", "g"):
+        attrs["date_basis"] = "UTC"
+        attrs["time_basis"] = ("granule overpass: mean time of the scanlines inside the grid "
+                               "(S5P) / file-name time (GEMS, MOD04/MYD04)")
+    for k, v in (adapter_kwargs or {}).items():
+        attrs[k] = str(v)
     attrs.update(extra_attrs or {})
     out = L3Writer().write_series(periods, results, grid, adapter.product, out_path,
                                   short_name=short_name or SHORT_NAME.get(product),

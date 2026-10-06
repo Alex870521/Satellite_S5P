@@ -26,16 +26,23 @@ from src.config.catalog import PRODUCT_CONFIGS
 from src.processing.l3.granule import GranuleL2
 
 # MCD19A2.A2023001.h28v06...  /  MOD04_L2.A2023001.0250...
-_DATE_RE = re.compile(r"\.A(\d{4})(\d{3})\.")
+_DATE_RE = re.compile(r"\.A(\d{4})(\d{3})\.(?:(\d{2})(\d{2})\.)?")
 
 
 def _date_from_name(name: str) -> np.datetime64 | None:
-    """MODIS 檔名的 A{YYYY}{DOY} → datetime64。取不到回 None。"""
+    """MODIS 檔名的 A{YYYY}{DOY}[.HHMM] → datetime64。取不到回 None。
+
+    MOD04/MYD04 是 5 分鐘 granule,檔名帶 UTC 起始時刻(逐軌輸出要用);
+    MCD19A2 是已合併多軌的逐日 tile,只有日期。
+    """
     m = _DATE_RE.search(name)
     if not m:
         return None
     year, doy = int(m.group(1)), int(m.group(2))
-    return np.datetime64(f"{year}-01-01", "ns") + np.timedelta64(doy - 1, "D")
+    t = np.datetime64(f"{year}-01-01", "ns") + np.timedelta64(doy - 1, "D")
+    if m.group(3) is not None:
+        t = t + np.timedelta64(int(m.group(3)), "h") + np.timedelta64(int(m.group(4)), "m")
+    return t
 
 
 class MODISAdapter:

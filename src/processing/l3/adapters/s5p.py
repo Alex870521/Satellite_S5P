@@ -16,6 +16,18 @@ from src.config.catalog import PRODUCT_CONFIGS
 from src.processing.l3.granule import GranuleL2
 
 
+def _scan_times(ds: xr.Dataset, reference: np.datetime64) -> np.ndarray | None:
+    """逐掃描線的絕對時間 (scanline,)。xarray 通常已把 delta_time 解碼成 datetime64;
+    沒解碼時它是相對參考時間的毫秒數。沒有 delta_time 回 None。"""
+    if "delta_time" not in ds:
+        return None
+    dt = np.asarray(ds["delta_time"][0].values)
+    if np.issubdtype(dt.dtype, np.datetime64):
+        return dt.astype("datetime64[ns]")
+    offsets: np.ndarray = np.round(dt).astype("int64").astype("timedelta64[ms]")
+    return np.asarray(reference + offsets, dtype="datetime64[ns]")
+
+
 class S5PAdapter:
     source = "S5P"
 
@@ -35,7 +47,9 @@ class S5PAdapter:
             lon = ds["longitude"][0].values
             val = ds[var][0].values
             qa = ds["qa_value"][0].values if "qa_value" in ds else None
+            # ``time`` 是當天 00:00 UTC 的參考時間;每條掃描線的實際時間在 delta_time
             time = np.datetime64(ds["time"].values[0], "ns")
+            scan_time = _scan_times(ds, time)
 
             lat_c = lon_c = None
             if self.use_native_corners:
@@ -51,7 +65,7 @@ class S5PAdapter:
             return GranuleL2(
                 values=val, lon=lon, lat=lat, time=time, product=self.product, qa=qa,
                 lat_corners=lat_c, lon_corners=lon_c,
-                source=self.source, file_name=nc_file.name,
+                source=self.source, file_name=nc_file.name, scan_time=scan_time,
             )
         finally:
             ds.close()

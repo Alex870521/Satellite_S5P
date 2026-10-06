@@ -167,6 +167,11 @@ cython_debug/
 # Project-specific: anything whose name starts with "wip" (file or folder, at any level)
 wip*
 
+# Research code grouped by topic (2026-10 reorg); not version-controlled for now
+/projects/
+# Working notes for that reorg (path inventory); local only
+/docs/reorg-2026-10/
+
 # Large / raw geodata — keep out of git (re-download or store externally).
 # Note: data/shapefiles/{stations,taiwan,China/gadm36_CHN_0.*} are tracked (used for plotting).
 data/TEMIS_UV/

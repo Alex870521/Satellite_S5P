@@ -82,6 +82,12 @@ km 模式保留不動(回歸未破)。
 - `L3Pipeline.aggregate(files, freq="D"|"M"|"Y")`:依時間分窗聚合,**串流**實作 —— 先用檔名日期
   排序、換窗即 finalize,任何時刻只有一個 accumulator 活著(~1.6MB;若先全讀再分組,整年 daily 約 350MB)。
   檔名順序與檔內時間不一致會 **raise**,不會靜靜輸出重複期別。
+- **`freq="granule"` 逐軌(2026-10-06)**:每個 granule 自成一個時間步,不合併同日多軌。時間 = **過境時刻**:
+  S5P 取「有像元落在目標網格內的掃描線」的平均 `delta_time`(檔案的 `time` 只是當天 00:00 參考時間;
+  台灣框實測約 04–06 UTC);GEMS 用檔名時槽、MOD04/MYD04 用檔名 `.HHMM`。兩檔同一時刻會 raise
+  (MCD19A2 是已合併多軌的逐日 tile,沒有逐軌意義)。`count` 在逐軌模式下只是 0/1,`std` 為 0。
+  CLI:`--freq granule`,預設檔名加 `_granule`(`M`/`Y` 也各加後綴,不會蓋到逐日年檔)。
+  過境時刻的改動不影響逐日輸出(2023 年前 16 天與既有年檔逐格相同)。
 - `L3Writer.write_series(...)`:聚合結果 → 單一 `(time, lat, lon)` nc,含 `value`/`count`/`std`。
   座標直接用 **`lat`/`lon` 短名**、變數用短名(no2/o3/so2/aod)→ **模型端不必再 rename**
   (舊管線每次 merge 完都要手動改名的那一步,在這裡一次做對)。
@@ -127,7 +133,7 @@ km 模式保留不動(回歸未破)。
 |---|---|---|---|
 | 1 | 舊 processor 處理過的**每個產品**都有 L3 adapter,且**數值上**對過參照 | 🟡 S5P:**六種產品已對 HARP 驗證**(NO2/O3/CO/CH4 r ≥ 0.99、SO2/HCHO r ≥ 0.975,偏差皆 ±1% 內,2026-10-06);**AER_AI 未驗**(碟上無原始檔)。GEMS:六項都有 adapter key,**無參照可對**。MODIS:MYD04_L2 未驗 | `tests/test_l3.py::HARP_CASES` 補齊 S5P 產品;GEMS/MODIS 至少做「點落格 vs 超取樣」覆蓋差自驗(見上一節 ⬜) |
 | 2 | `automation/run_pipeline.py` 每個 `process_data()` 都換成等價的 `process_l3()`,並**實際跑過一整年**排程 | ⬜ 仍呼叫 `process_data()`:Sentinel `:184`、MODIS `:223`(ERA5 `:303` 不在 L3 範圍,不計) | 排程改呼叫後,跑滿 12 個月沒有人工補檔 |
-| 3 | `wip_*` 沒有腳本再讀舊路徑的 processed 佈局 | ⬜ **36 個腳本**讀舊佈局(`wip_emission` 20、`wip_no2_anomaly` 10、`wip_plume` 6;樣式含 `GEMS/processed`、`processed/L2`、`merged_20…`);讀 `*_l3_02deg_*` 年檔的是 **0** | `grep -rlE "Sentinel-5P/processed\|processed/L2\|GEMS/processed\|MODIS/processed\|merged_20" wip_* --include='*.py'` 為空 |
+| 3 | `projects/*`(原 `wip_*`)沒有腳本再讀舊路徑的 processed 佈局 | 🟡 2026-10-06:`taipower_no2` 10 支已改讀 `S5P_no2_l3_02deg_<年>_granule.nc`(x₀ 台中 19.0 / 通霄 18.6 km,與舊檔 ≈19 km 一致)、`fnr` 5 支與 `gems_plume` transboundary 2 支已改讀 L3;**仍讀舊佈局**:GEMS merged 總柱量 29 支(emission/gems、gems_plume、cems_satellite,待決定口徑)、models 的 0.01° RBF 年檔 5 支 | `grep -rlE "Sentinel-5P/processed\|processed/L2\|GEMS/processed\|MODIS/processed\|merged_20" projects --include='*.py'` 為空 |
 | 4 | 舊路徑獨有能力有新的落腳處 | ⬜ 逐站 CSV 抽取 `SentinelProcessor.process_files_to_csv`(呼叫點已註解,刻意停用)、GeoTIFF `save_as_tiff`(同)、逐檔出圖與 `GEMSProcessor.animate_month` 動畫 —— L3 都沒有 | 每項要嘛在 L3 側有等價入口,要嘛明確決定「不再需要」並記在這裡 |
 | 5 | **aero-web 網站衛星頁**不再讀舊路徑產出(2026-10-06 補) | ⬜ `aero-web-server/backend/services/satellite_raster_service.py` 直接讀:S5P `processed/L2/<產品>/` **逐軌**檔(NO2/HCHO/O3/CH4/SO2)、GEMS 逐時槽 granule(總柱量 `ColumnAmountNO2`)、MODIS `MOD04_L2`/`MYD04_L2` 年檔,並支援 `processed_<region>/` 區域資料夾。**L3 目前沒有逐軌輸出、也沒有區域資料夾**,做不出這些 | L3 先提供逐軌網格輸出(`L3Pipeline.process_file` 已能單檔處理,缺寫檔佈局);網站改讀後部署到 mini 並跑一段時間 |
 
@@ -141,7 +147,7 @@ km 模式保留不動(回歸未破)。
 | 網站逐軌顯示、wip 的電廠 / 羽流 / 異常分析(原生解析度、一軌一檔) | 舊 processor |
 | 模型輸入、跨衛星與跨年比對(統一 0.02° 網格、逐日) | 本 pipeline |
 
-要讓舊路徑退場,前提是先決定 **L3 要不要也輸出逐軌檔**(條件 5);不要的話,兩條路就是長期並存,本節即是分工說明。
+**L3 已能輸出逐軌檔**(`freq="granule"`,2026-10-06),條件 5 與 wip 羽流分析的能力缺口已補上;剩下的是網站與 `projects/taipower_no2` 改讀、以及區域資料夾佈局。
 
 **順序建議**(若決定走退場):1 → 4 → 5 → 3 → 2。先證明數值等價(1)、補齊能力(4),wip 才有東西可以遷(3);
 排程(2)最後換,因為它一換就開始每天產新格式的檔。

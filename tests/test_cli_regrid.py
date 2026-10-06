@@ -47,7 +47,8 @@ class TestCliDelegatesToRunner:
         def boom(*a, **k):
             raise ValueError("聚合結果為空")
         monkeypatch.setattr(cli, "regrid_to_series", boom)
-        assert cli.main(ARGS + ["--out", str(tmp_path / "o.nc")]) == 1
+        # merge:這個測試驗的是「聚合為空要回報」,不是時槽切分
+        assert cli.main(ARGS + ["--slot-mode", "merge", "--out", str(tmp_path / "o.nc")]) == 1
 
     def test_cli_has_no_private_orchestration_left(self):
         """B5 的收斂條件:CLI 裡不能再有自己的 L3Pipeline 組裝或 adapter 工廠副本。"""
@@ -67,7 +68,10 @@ class TestCliGolden:
         if not any(b.exists() for b in cli.BASE_DIRS):
             pytest.skip("外接碟未掛載")
         out = tmp_path / "g.nc"
-        rc = cli.main(ARGS + ["--limit", "3", "--out", str(out)])
+        rc = cli.main(ARGS + ["--limit", "3", "--out", str(out),
+                                # 釘的是 2026-08-05 的舊語意:不篩雲量/殘差、UTC、時槽合併
+                                "--slot-mode", "merge", "--cloud-max", "none",
+                                "--rms-max", "none", "--tz-offset", "0"])
         if rc == 1:
             pytest.skip("該碟上找不到 GEMS 2022 raw")
         assert rc == 0

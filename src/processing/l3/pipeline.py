@@ -47,6 +47,7 @@ class L3Pipeline:
         g = self.adapter.read(nc_file)
         if g is None:
             return None
+        g.time = _overpass_time(g, self.grid)
         return self.regrid_granule(g)
 
     def process_file(self, nc_file: str | Path,
@@ -74,14 +75,18 @@ class L3Pipeline:
     # 階段二:時間聚合
     # ------------------------------------------------------------------ #
     def aggregate(self, files: Iterable[str | Path], freq: str = "D",
-                  level: str | None = None, on_period=None, progress=None):
+                  level: str | None = None, on_period=None, progress=None,
+                  tz_offset_hours: float = 0):
         """把多個 granule 依時間分窗(freq)聚合成每窗一張場。
 
         因為每個 granule 經超取樣後就已經在同一張固定網格上,聚合 = 逐格加權平均
         (權重 = 該格的子點 count),由 :class:`L3Accumulator` 累加。
 
-        ``freq``: ``"D"`` 日 / ``"M"`` 月 / ``"Y"`` 年。
+        ``freq``: ``"D"`` 日 / ``"M"`` 月 / ``"Y"`` 年 / ``"granule"`` 逐軌(每個 granule
+        自成一窗,期別 = 過境時刻,不合併同日多軌;``tz_offset_hours`` 對它無作用)。
         ``on_period(period, result)``: 每完成一窗就回呼(可邊做邊寫檔,不必全留記憶體)。
+        ``tz_offset_hours``: 分窗前把 granule 時間加上這個位移(GEMS 用 8 = 台灣當地日期;
+        預設 0 = UTC,S5P / MODIS 的既有年檔不受影響)。
         回傳 ``[(period, {"value","count","std"}), ...]``,依時間排序。
 
         **串流**:先用檔名日期把檔案排成時間序,再一邊讀一邊累加,換窗即 finalize →
@@ -99,7 +104,13 @@ class L3Pipeline:
                 progress(f, gf)
             if gf is None:
                 continue
-            period = _period_key(np.datetime64(gf.time, "ns"), freq)
+            period = _period_key(np.datetime64(gf.time, "ns"), freq, tz_offset_hours)
+            if _is_granule(freq) and (period == cur or period in seen):
+                # 同一時刻(相鄰時會被下面的換窗邏輯默默併成一筆,所以要在這裡就攔)
+                raise ValueError(
+                    f"逐軌模式下 {f.name} 與另一個檔的過境時刻相同({period}):"
+                    f"這個產品的檔案沒有逐軌時間(例如 MCD19A2 是已合併多軌的逐日 tile),"
+                    f"不能用 freq='granule'。")
             if cur is None or period != cur:
                 if acc is not None:
                     res = acc.finalize()
@@ -124,12 +135,45 @@ class L3Pipeline:
         return out
 
 
-def _period_key(t: np.datetime64, freq: str) -> np.datetime64:
-    """granule 時間 → 分窗鍵(該窗的起點)。"""
+def _period_key(t: np.datetime64, freq: str, tz_offset_hours: float = 0) -> np.datetime64:
+    """granule 時間 → 分窗鍵(該窗的起點)。``tz_offset_hours`` 讓分窗依當地時間切。
+
+    例:GEMS 的 UTC 23:45 是台灣隔天 07:45,UTC 分組會把它算進前一天。
+    """
+    if _is_granule(freq):
+        return cast(np.datetime64, np.datetime64(t, "ns"))   # 逐軌:期別就是過境時刻本身
+    if tz_offset_hours:
+        t = t + np.timedelta64(int(round(tz_offset_hours * 3600)), "s")
     unit = {"D": "D", "M": "M", "Y": "Y"}.get(freq.upper())
     if unit is None:
-        raise ValueError(f"freq 只支援 D/M/Y,收到 {freq!r}")
+        raise ValueError(f"freq 只支援 D/M/Y/granule,收到 {freq!r}")
     return cast(np.datetime64, t.astype(f"datetime64[{unit}]"))
+
+
+def _is_granule(freq: str) -> bool:
+    return freq.lower() in ("granule", "g")
+
+
+def _overpass_time(g: GranuleL2, grid: GridSpec) -> np.datetime64:
+    """granule 在目標網格範圍內的平均觀測時刻。
+
+    S5P 一個檔是一整圈軌道(~100 分鐘),掃過台灣框只有一兩分鐘;檔案的 ``time`` 又只是
+    當天 00:00 的參考時間。取「有像元落在網格範圍內的掃描線」的平均時間,才是逐軌輸出
+    要的過境時刻。沒有 ``scan_time``(GEMS/MODIS 由檔名給時間)或掃描線全在框外時,
+    原樣回傳 ``g.time``。
+    """
+    if g.scan_time is None:
+        return g.time
+    lat, lon = grid.lat, grid.lon
+    inside = ((g.lat >= lat.min()) & (g.lat <= lat.max())
+              & (g.lon >= lon.min()) & (g.lon <= lon.max()))
+    rows = inside.any(axis=1)
+    t = np.asarray(g.scan_time)[rows]
+    t = t[~np.isnat(t)]
+    if t.size == 0:
+        return g.time
+    ns = t.astype("datetime64[ns]").astype("int64")
+    return np.datetime64(int(round(float(ns.mean()))), "ns")
 
 
 def _name_sort_key(p: Path):
