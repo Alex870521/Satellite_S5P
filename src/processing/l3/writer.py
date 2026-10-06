@@ -28,7 +28,7 @@ class L3Writer:
                 "description": gf.product.title,
                 "processing_method": gf.method,
                 "source": gf.source,
-                "resolution": list(gf.grid.resolution),
+                "resolution": list(gf.grid.resolution or ()),   # GridSpec.__post_init__ 保證非 None
             },
         )
 

@@ -9,80 +9,75 @@ from cartopy.feature import ShapelyFeature
 from src.config.settings import FIGURE_DPI
 
 
-def plot_taiwan_map(map_scale='Taiwan', fig=None, ax=None, counties_path=None, dpi=FIGURE_DPI):
+# map_scale 的預設範圍 [lon_min, lon_max, lat_min, lat_max]。
+# ⚠️ 以前 plot_taiwan_power_plant.py 另有一份同名同簽名的函式,同樣的 'Taiwan' 卻畫
+#    中北部(台中電廠周邊);2026-10 合併後那個範圍改叫 'Central','Taiwan' 一律是全島。
+EXTENTS = {
+    'Taiwan': [119, 123, 21, 26],
+    'Central': [120, 121.5, 23.4, 25],
+    'East_Asia': [105, 140, 15, 45],
+    'Global': None,
+}
+
+
+def plot_taiwan_map(map_scale='Taiwan', fig=None, ax=None, counties_path=None, dpi=FIGURE_DPI,
+                    *, extent=None, land_color='gray', figsize=(14, 10), tight_layout=True):
     """
     繪製台灣地圖，使用遮罩避免海岸線與縣市邊界重疊
 
     參數:
-    - map_scale: 字符串，'Taiwan' 或 'East_Asia'，設定地圖範圍
-    - fig: matplotlib 圖形對象，如果為 None 則創建新圖形
-    - ax: matplotlib 坐標軸對象，如果為 None 則創建新坐標軸
-    - counties_path: 台灣縣市邊界 shapefile 路徑，如果為 None 則使用預設路徑
-    - dpi: 圖形分辨率
+    - map_scale: 'Taiwan'(全島)/ 'Central'(中北部,電廠圖用)/ 'East_Asia' / 'Global'
+    - fig, ax: 既有的 figure / GeoAxes;None 則新建
+    - counties_path: 台灣縣市邊界 shapefile;None 用 repo 內預設
+    - dpi: 新建 figure 時的解析度
+    - extent: 直接給 [lon_min, lon_max, lat_min, lat_max],優先於 map_scale
+    - land_color: 陸地與縣市填色('gray';電廠圖用 'lightgray')
+    - figsize: 新建 figure 時的尺寸
+    - tight_layout: 畫完是否呼叫 plt.tight_layout()
 
-    返回:
-    - fig: matplotlib 圖形對象
-    - ax: matplotlib 坐標軸對象
+    返回: (fig, ax)
     """
-    # 設置範圍
-    if map_scale == 'Taiwan':
-        extent = [119, 123, 21, 26]
-    elif map_scale == 'East_Asia':
-        extent = [105, 140, 15, 45]
-    elif map_scale == 'Global':
-        extent = None
-    else:
-        raise ValueError("map_scale 必須是 'Taiwan' or 'East_Asia' or 'global'")
+    if extent is None:
+        if map_scale not in EXTENTS:
+            raise ValueError(f"map_scale 必須是 {list(EXTENTS)} 之一,得到 {map_scale!r}")
+        extent = EXTENTS[map_scale]
 
-    # 創建圖形和坐標軸（如果未提供）
     if fig is None:
-        fig = plt.figure(figsize=(14, 10), dpi=dpi)
+        fig = plt.figure(figsize=figsize, dpi=dpi)
     if ax is None:
         ax = plt.axes(projection=ccrs.PlateCarree())
 
-    # 設置地圖範圍
-    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    if extent is None:
+        ax.set_global()                       # 'Global':以前 set_extent(None) 會直接報錯
+    else:
+        ax.set_extent(extent, crs=ccrs.PlateCarree())
 
-    # 設置路徑
     if counties_path is None:
         counties_path = Path(__file__).parents[2] / "data/shapefiles/taiwan/COUNTY_MOI_1090820.shp"
 
-    # 添加背景地圖特徵
-    ax.add_feature(cfeature.LAND.with_scale('10m'), linewidth=0.5, color='gray', alpha=0.3, zorder=0)
+    ax.add_feature(cfeature.LAND.with_scale('10m'), linewidth=0.5, color=land_color, alpha=0.3, zorder=0)
     ax.add_feature(cfeature.BORDERS.with_scale('10m'), linewidth=0.5, zorder=1)
-    # ax.add_feature(cfeature.COASTLINE.with_scale('10m'), linewidth=0.5, zorder=1)
 
     try:
-        # 讀取台灣縣市邊界
         counties_gdf = gpd.read_file(counties_path)
-
-        # 創建台灣形狀的遮罩
-        taiwan_shape = unary_union(counties_gdf['geometry'].tolist())
-
-        # 擴大遮罩區域
-        expanded_mask = taiwan_shape.buffer(0.05)
-
-        # 創建遮罩特徵
-        mask_feature = ShapelyFeature([expanded_mask], ccrs.PlateCarree(),
-                                      edgecolor='none', facecolor='white', alpha=1)
-
-        # 添加遮罩，覆蓋掉標準海岸線
-        ax.add_feature(mask_feature, zorder=2)
-
-        # 添加縣市邊界
-        counties_feature = ShapelyFeature(counties_gdf['geometry'], ccrs.PlateCarree(),
-                                          edgecolor=(0, 0, 0, 0.3), facecolor='gray', alpha=0.3, linewidth=0.5)
-        ax.add_feature(counties_feature, zorder=4)
-
+        # 台灣形狀外擴一點當白色遮罩,蓋掉標準海岸線,避免和縣市邊界雙線重疊
+        expanded_mask = unary_union(counties_gdf['geometry'].tolist()).buffer(0.05)
+        ax.add_feature(ShapelyFeature([expanded_mask], ccrs.PlateCarree(),
+                                      edgecolor='none', facecolor='white', alpha=1), zorder=2)
+        ax.add_feature(ShapelyFeature(counties_gdf['geometry'], ccrs.PlateCarree(),
+                                      edgecolor=(0, 0, 0, 0.3), facecolor=land_color,
+                                      alpha=0.3, linewidth=0.5), zorder=4)
     except Exception as e:
-        print(f"讀取或處理縣市邊界時發生錯誤: {e}")
+        # 讀不到縣市邊界時退回標準海岸線(原本只有電廠版這麼做,全島版會畫出沒有海岸線的圖)
+        print(f"讀取或處理縣市邊界時發生錯誤: {e};改用標準海岸線")
+        ax.add_feature(cfeature.COASTLINE.with_scale('10m'), linewidth=0.5, zorder=1)
 
-    # 添加網格線
     gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
     gl.top_labels = False
     gl.right_labels = False
 
-    plt.tight_layout()
+    if tight_layout:
+        plt.tight_layout()
 
     return fig, ax
 

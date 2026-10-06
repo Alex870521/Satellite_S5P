@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -28,7 +29,7 @@ from .region import region_mask
 def _norm_dt(x) -> datetime:
     if isinstance(x, datetime):
         return x
-    return pd.to_datetime(x).to_pydatetime()
+    return cast(datetime, pd.to_datetime(x).to_pydatetime())
 
 
 def compute_coverage(hub: str, product: str, region: str,
@@ -53,7 +54,7 @@ def compute_coverage(hub: str, product: str, region: str,
     # fixed; a second signature means the product folder mixes grids (e.g. an old
     # interpolated cube next to a binned one) and union is meaningless -> error.
     grids: dict = {}
-    grid = {"weights": None, "mask": None, "total": None, "sig": None}
+    grid: dict[str, Any] = {"weights": None, "mask": None, "total": None, "sig": None}
 
     per_file_rows: list[CoverageRow] = []
 
@@ -104,7 +105,7 @@ def compute_coverage(hub: str, product: str, region: str,
     if df.empty or granularity == "daily":
         return df
 
-    return _aggregate(df, hub, product, region, weight, granularity)
+    return cast(pd.DataFrame, _aggregate(df, hub, product, region, weight, granularity))
 
 
 def _aggregate(daily: pd.DataFrame, hub, product, region, weight, granularity):
@@ -117,7 +118,7 @@ def _aggregate(daily: pd.DataFrame, hub, product, region, weight, granularity):
     for ts, chunk in g:
         if chunk.empty:
             continue
-        rows.append(_row(hub, product, region, ts.to_pydatetime(), granularity,
+        rows.append(_row(hub, product, region, cast(pd.Timestamp, ts).to_pydatetime(), granularity,
                          weight, float(chunk["valid"].mean()),
                          float(chunk["total"].iloc[0]),
                          int(chunk["n_slices"].sum()),

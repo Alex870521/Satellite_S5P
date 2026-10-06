@@ -358,25 +358,38 @@ class TestRealData:
         gf = pipe.build_field(f)
         assert gf is None or gf.value.shape == (251, 201)
 
-    # 多氣體 × 多軌:沿用 wip_l3/validate_supersample.py 的覆蓋面
-    # (實測 r min 0.996 / mean 0.999;HCHO 尚未驗過,見 l3/README)
+    # 六種 S5P 產品 × 三個月,對 HARP bin_spatial 逐格比對(2026-10-06 擴充;原本只有 NO2/O3)。
+    # 年份挑工作碟上有原始檔的那年;產品碼 → (年份, 網格, r 門檻)。
+    #   * 門檻 0.99:NO2 / O3 / CO / CH4 實測 0.991–0.9997。
+    #   * 門檻 0.97:SO2 / HCHO 實測 0.975–0.991。訊號弱、像元間雜訊大,子點取樣與 HARP
+    #     精確多邊形面積的差異被放大;K 從 4 → 8 → 16 時 r 隨之上升(HCHO 0.984→0.990→0.991),
+    #     確認是 K=4 的取樣精細度而非方法錯誤。K=4 是刻意的研究預設,不為測試改它。
+    #   * CH4 用東亞陸地框:短波紅外線反演在海面與雲下無值,台灣框實測兩邊都是 0 格。
+    #   偏差全部在 ±1% 內。
+    _TW = dict(resolution=(5.5, 3.5))
+    _EA_CH4 = dict(resolution=(5.5, 7.0), bounds=(100, 135, 15, 45))
     HARP_CASES = [
-        ("NO2___", "Sentinel-5P/raw/L2/NO2___/{ym}/*.nc"),
-        ("O3____", "Sentinel-5P/raw/L2/O3____/{ym}/*.nc"),
+        ("NO2___", "2024", _TW, 0.99),
+        ("O3____", "2022", _TW, 0.99),
+        ("CO____", "2023", _TW, 0.99),
+        ("CH4___", "2023", _EA_CH4, 0.99),
+        ("SO2___", "2024", _TW, 0.97),
+        ("HCHO__", "2023", _TW, 0.97),
     ]
 
-    @pytest.mark.parametrize("product,pattern", HARP_CASES)
-    @pytest.mark.parametrize("ym", ["2023/03", "2023/07", "2023/12"])
-    def test_vs_harp_oracle(self, product, pattern, ym):
-        """自建超取樣 vs HARP bin_spatial:逐格 r 必須 >= 0.99。"""
+    @pytest.mark.parametrize("product,year,grid_kw,min_r", HARP_CASES,
+                             ids=[c[0].strip("_") for c in HARP_CASES])
+    @pytest.mark.parametrize("month", ["03", "07", "12"])
+    def test_vs_harp_oracle(self, product, year, grid_kw, min_r, month):
+        """自建超取樣 vs HARP bin_spatial:逐格 r 不得低於該產品門檻,偏差 ±1% 內。"""
         from src.processing.l3.harp_oracle import harp_available, harp_oracle
         from src.processing.l3.runner import make_adapter
         if not harp_available():
-            pytest.skip("HARP CLI 未安裝(micromamba create -n harp -c conda-forge harp)")
-        fs = _glob_roots(pattern.format(ym=ym))
+            pytest.skip("HARP CLI 未安裝(micromamba create -p ~/mamba/envs/harp -c conda-forge harp)")
+        fs = _glob_roots(f"Sentinel-5P/raw/L2/{product}/{year}/{month}/*.nc")
         if not fs:
-            pytest.skip(f"找不到 {product} {ym} 的樣本檔")
-        grid = GridSpec(resolution=(5.5, 3.5))          # 用 km 網格對齊 HARP 驗證慣例
+            pytest.skip(f"找不到 {product} {year}/{month} 的樣本檔")
+        grid = GridSpec(**grid_kw)                      # 用 km 網格對齊 HARP 驗證慣例
         oracle = harp_oracle(fs[0], product, grid)
         if oracle is None:
             pytest.skip("HARP 未產出 oracle(該軌可能無有效資料)")
@@ -385,5 +398,6 @@ class TestRealData:
             pytest.skip("adapter 讀不到有效資料")
         gf = SupersampleBinRegridder(K=4).regrid(g, grid)
         m = compare_fields(oracle, gf.value)
-        assert m["n_common"] > 50
-        assert m["cell_r"] >= 0.99, f"{product} {ym}: r={m['cell_r']:.4f}"
+        assert m["n_common"] > 50, f"{product} {year}/{month}: 共同有效格只有 {m['n_common']}"
+        assert m["cell_r"] >= min_r, f"{product} {year}/{month}: r={m['cell_r']:.4f} < {min_r}"
+        assert abs(m["cell_bias_pct"]) < 1.0, f"{product} {year}/{month}: bias={m['cell_bias_pct']:.2f}%"

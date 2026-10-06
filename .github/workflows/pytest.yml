@@ -34,3 +34,8 @@ jobs:
           pip install -e ".[dev]"
       - name: Run tests (pure logic; requires_data tests are skipped here)
         run: pytest -m "not requires_data"
+
+      # 型別檢查:範圍與例外都在 pyproject [tool.mypy](目前只守 l3 與 coverage,已歸零)。
+      # 有錯就讓 CI 失敗;要擴大範圍改 pyproject 的 files,不必改這裡。
+      - name: Type check (mypy)
+        run: mypy

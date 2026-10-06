@@ -66,12 +66,12 @@ def compare_fields(a: np.ndarray, b: np.ndarray) -> dict:
                 da.append(a[i][m].mean())
                 db.append(b[i][m].mean())
         if len(da) > 1:
-            da, db = np.asarray(da), np.asarray(db)
-            k = np.isfinite(da) & np.isfinite(db)
+            xa, xb = np.asarray(da), np.asarray(db)        # list → ndarray 換新名,型別才一致
+            k = np.isfinite(xa) & np.isfinite(xb)
             if k.sum() > 1:
-                out["daily_r"] = float(np.corrcoef(da[k], db[k])[0, 1])
-                d = np.abs(da[k]).mean()
-                out["daily_bias_pct"] = float((db[k] - da[k]).mean() / d * 100) if d else np.nan
+                out["daily_r"] = float(np.corrcoef(xa[k], xb[k])[0, 1])
+                d = np.abs(xa[k]).mean()
+                out["daily_bias_pct"] = float((xb[k] - xa[k]).mean() / d * 100) if d else np.nan
     return out
 
 

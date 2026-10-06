@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, cast
 
 import numpy as np
 
@@ -31,7 +31,7 @@ class L3Pipeline:
         self.writer = writer or L3Writer()
 
     def regrid_granule(self, g: GranuleL2) -> GriddedField:
-        return self.regridder.regrid(g, self.grid)
+        return cast(GriddedField, self.regridder.regrid(g, self.grid))
 
     def build_field(self, nc_file: str | Path,
                     level: str | None = None) -> GriddedField | None:
@@ -114,6 +114,7 @@ class L3Pipeline:
                         f" 請檢查 {f.name} 的檔名日期是否與檔內時間一致。")
                 seen.add(period)
                 acc, cur = L3Accumulator(self.grid), period
+            assert acc is not None   # 第一個有效 granule 一定先建好 acc
             acc.add(gf)
         if acc is not None:
             res = acc.finalize()
@@ -128,7 +129,7 @@ def _period_key(t: np.datetime64, freq: str) -> np.datetime64:
     unit = {"D": "D", "M": "M", "Y": "Y"}.get(freq.upper())
     if unit is None:
         raise ValueError(f"freq 只支援 D/M/Y,收到 {freq!r}")
-    return t.astype(f"datetime64[{unit}]")
+    return cast(np.datetime64, t.astype(f"datetime64[{unit}]"))
 
 
 def _name_sort_key(p: Path):

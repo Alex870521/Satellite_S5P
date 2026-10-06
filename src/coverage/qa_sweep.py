@@ -22,6 +22,7 @@ import os
 import random
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -54,7 +55,7 @@ def _file_date(path: str) -> datetime | None:
         return None
     if t is not None and t.tzinfo is not None:
         t = t.replace(tzinfo=None)
-    return t
+    return cast("datetime | None", t)
 
 
 def _raw_files(product: str, start: datetime, end: datetime,
@@ -146,6 +147,7 @@ def summarize(per_file: pd.DataFrame) -> pd.DataFrame:
 def plot_qa_sweep(per_file: pd.DataFrame, output=None, *, dpi=600, title=None):
     """2x2 summary: density histograms, boxplot, mean±std bar, mean-vs-qa line."""
     import matplotlib.pyplot as plt
+    import matplotlib
 
     if per_file.empty:
         raise ValueError("no QA-sweep rows to plot")
@@ -153,7 +155,7 @@ def plot_qa_sweep(per_file: pd.DataFrame, output=None, *, dpi=600, title=None):
     stats = summarize(per_file).set_index("qa")
     means = np.array([stats.loc[q, "mean"] for q in qa_values])
     stds = np.array([stats.loc[q, "std"] for q in qa_values])
-    colors = plt.cm.viridis(np.linspace(0.15, 0.85, len(qa_values)))
+    colors = matplotlib.colormaps["viridis"](np.linspace(0.15, 0.85, len(qa_values)))   # 同 plt.cm.viridis
 
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
 

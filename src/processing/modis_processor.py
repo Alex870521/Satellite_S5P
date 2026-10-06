@@ -1,6 +1,6 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, List, Dict, Optional, Tuple
+from typing import Any, Literal, List, Dict, Optional, Tuple
 import cartopy.crs as ccrs
 import numpy as np
 import xarray as xr
@@ -32,8 +32,8 @@ class MODISProcessor:
         self.raw_dir = None
         self.processed_dir = None
         self.figure_dir = None
-        self.logger = None
-        self.file_type = None
+        self.logger: Optional[Any] = None       # 由 hub 或 l3 adapter 注入
+        self.file_type: Optional[str] = None
         self.aod_variable = aod_variable  # 新增：可配置的 AOD 變量名稱
 
         # 預設參數

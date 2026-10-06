@@ -2,7 +2,7 @@
 
 - SupersampleBinRegridder: footprint 超取樣 binning(physical oversampling)。三 source
   共用的量化預設。純 Python(scipy),補滿覆蓋 + 面積加權自然浮現。多軌×多氣體
-  驗證 vs HARP oracle r min 0.996 / mean 0.999。取代 HARP runtime。
+  驗證 vs HARP oracle:六種 S5P 產品 r 0.975–0.9997、偏差 ±1% 內。取代 HARP runtime。
 - RbfRegridder: 可選平滑/看圖 mode,沿用既有 DataInterpolator。
 """
 from __future__ import annotations
@@ -124,8 +124,8 @@ class SupersampleBinRegridder:
         ax, bx, cx, dx = lonp[si, gj], lonp[si + 1, gj], lonp[si + 1, gj + 1], lonp[si, gj + 1]
         ay, by, cy, dy = latp[si, gj], latp[si + 1, gj], latp[si + 1, gj + 1], latp[si, gj + 1]
         u = (np.arange(K) + 0.5) / K
-        s, t = np.meshgrid(u, u)
-        s, t = s.ravel(), t.ravel()
+        s2d, t2d = np.meshgrid(u, u)
+        s, t = s2d.ravel(), t2d.ravel()      # 2D → 1D 換新名,新版 numpy 的形狀型別才一致
 
         def bilinear(a, b, c, d):
             # P(s,t) = (1-s)(1-t)A + s(1-t)B + stC + (1-s)tD

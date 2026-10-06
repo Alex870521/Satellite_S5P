@@ -125,14 +125,14 @@
 - **C12 ✅ 抽掉 `_pick` 與 GEMS regex 的重複**。`_pick` 抽到 `src/utils/nc_names.py`;三份 GEMS regex 收斂成呼叫 `extract_datetime_from_filename`。`l3/adapters/gems.py` 是 wip 重度依賴,但 `read()` 簽名與行為不變。驗證:**先**為 `extract_datetime_from_filename` 補測試(S5P/MODIS/GEMS 三種檔名)—— 它零測試卻是 L3 聚合的隱含前提。
 - **C11 ✅ 靜默失敗變有訊息**。`sentinel_processor.py:461` 裸 except 具名 + log;`pipeline.py:137` 排序退化發 warning;`regridder.py:68-71` 全 NaN 場加 debug log;`core.py:204,253` 具名。四檔各約三行,l3 行為不變。驗證:餵一個檔名日期壞掉的檔進 `aggregate`,要看到 warning。
 - **C9 ✅ 讓 `l3_regrid_year.py` 真的走 `regrid_to_series`**(B5 收斂)。`main` 改呼叫 runner、刪 `_make_adapter` 改用 `runner.make_adapter`、`BOUNDS` 改 `runner.DEFAULT_BOUNDS`;`_discover` 保留(`tests/test_l3.py` import 它)。驗證:**先**加測試對同一批 fixture 分別走 CLI 與 `regrid_to_series`,斷言輸出 nc 的變數/attrs/數值完全相同,通過後再重構。
-- **C14** 🔒 安裝並執行 lint/mypy:先只對 `src/processing/l3/` 與 `src/coverage/` 跑 mypy,CI 加一步 `continue-on-error`,看噪音量再決定要不要擋。
+- **C14 ✅(第 1 步、第 2 步皆 2026-10-06 完成)** 安裝並執行 lint/mypy。**實測**:整個 `src/` 375 個錯(約 7 成在三個舊 processor),只看 l3 21 個、coverage 13 個 —— 全部是型別標註問題,沒有執行期 bug。**第 1 步已做**:l3 + coverage 歸零(`cast`/標註/`assert`/等價 API,零行為變更);`catalog` 的 `Literal[變數]` 改成先寫 Literal 再 `get_args()`(執行期常數逐值相同);pyproject 設 `files = [l3, coverage]`、舊 processor 等模組 `ignore_errors`、無型別檔的第三方套件 `ignore_missing_imports` → **repo 根目錄直接 `mypy` 即 Success**。**第 2 步已做**:CI 加 `Type check (mypy)` 一步、會擋。推之前用 uv 重建 CI 同款 3.12 乾淨環境實跑,抓到兩個「本機過、CI 會紅」的差異:① 本機 venv 剛好裝了 pandas-stubs/types-pytz,CI 沒有 → 加進 `dev` extra;② CI 依賴未鎖版本、會裝到 numpy 2.5/pandas 3.0(本機 2.1/2.2),新版型別更細 → 3 處改成兩版都過的寫法。兩環境 mypy 皆 Success、測試皆全過。原計畫:先只對 `src/processing/l3/` 與 `src/coverage/` 跑 mypy,CI 加一步 `continue-on-error`,看噪音量再決定要不要擋。
 
 ### 大重構,要先討論
 
-- **C15 舊/新路徑的收斂條件(產出是文件,不是重構)**。並存是刻意的,但沒寫下退場條件。建議寫進 `l3/README.md` 四條:① `SentinelProcessor`/`GEMSProcessor` 每個產品都有 l3 adapter 且過 HARP oracle;② `run_pipeline.py:184,223,303` 三個 `process_data()` 都有等價 `process_l3()` 並跑過整年;③ `wip_*` 無腳本依賴舊路徑檔案佈局;④ 舊路徑獨有能力有著落(CSV 逐站抽取、GeoTIFF、逐檔出圖)。四條打勾前舊路徑就是活的。
+- **C15 ✅ 舊/新路徑的收斂條件(產出是文件,不是重構)**。→ 2026-10-06 寫進 `src/processing/l3/README.md`「舊路徑的退場條件」,附四條的現況與驗證指令:**目前全未滿足**(wip 有 36 個腳本讀舊佈局)。2026-10-06 補第 5 條:**aero-web 網站衛星頁直接讀舊路徑的逐軌檔**,L3 沒有對應輸出 → 兩條路實為分工。並存是刻意的,但沒寫下退場條件。建議寫進 `l3/README.md` 四條:① `SentinelProcessor`/`GEMSProcessor` 每個產品都有 l3 adapter 且過 HARP oracle;② `run_pipeline.py:184,223,303` 三個 `process_data()` 都有等價 `process_l3()` 並跑過整年;③ `wip_*` 無腳本依賴舊路徑檔案佈局;④ 舊路徑獨有能力有著落(CSV 逐站抽取、GeoTIFF、逐檔出圖)。四條打勾前舊路徑就是活的。
 - **C16 三個 processor 掃檔邏輯統一**(B8 六份 → 一個共用函式)。會同時動三個 processor 核心迴圈,而它們零測試。**前置**:先為三個 `process_all_files` 建 golden-file 測試。估 >2 小時,獨立 session,且在 C1 上線後。
-- **C17 `plot_taiwan_map` 兩份的處置**:合併成一份帶 `extent` 參數 / 標 deprecated / 確認無用後移除。涉及刪檔,等你決定。
-- **C18** 🔒 `scripts/` 五處硬編路徑外部化:加 env 覆寫、保留現值當 fallback,既有指令不變。`download_epa_stations.py:100` 的跨 repo import 是另一層問題:那段 TLS 程式碼該屬於哪個 repo。
+- **C17 ✅ `plot_taiwan_map` 兩份的處置**(2026-10-06 合併):wip 無人 import src 版(wip 裡的都是本地副本);`plot_taiwan.py` 單一實作,`'Taiwan'`=全島、中北部改名 `'Central'`,新增 `extent=`/`land_color=`/`figsize=`/`tight_layout=`,`'Global'` 不再報錯;電廠模組同名函式改為保留原輸出的棄用 wrapper。四種組合合併前後逐像素相同。
+- **C18 ✅(2026-10-06,`932555f`)** `scripts/` 五處硬編路徑外部化:加 env 覆寫、保留現值當 fallback,既有指令不變。`download_epa_stations.py:100` 的跨 repo import 是另一層問題:那段 TLS 程式碼該屬於哪個 repo。
 
 ---
 
@@ -153,7 +153,7 @@ Phase 0  護欄(需 D3)          C1                                  ✅ 2026-09
 Phase 1  低風險一批            C7 C19 C2 C4 C5 C6 C8 C20 C13     ✅ 2026-09-09 完成,commit 9ca01d1/34bf4be/78daa29
 Phase 2  需先拍板              C3 ✅ C10 ✅                      2026-09-20 拍板「變數都保留給使用者」後完成,未 commit
 Phase 3  先寫測試再改          C12 ✅ → C11 ✅ → C9 ✅          2026-09-10 完成,commit 3805b74/08895bd/4cde537
-Phase 4  大項,各自獨立 session  C15(文件) C16 C17(D) C18 C14(D3)
+Phase 4  大項,各自獨立 session  C15 ✅ C18 ✅ C17 ✅ C14 ✅ | C16 擱置(等 C15 條件)
 ```
 
 Phase 1 全部不改變任何輸出數值;Phase 3 每項都以「新增的測試先通過」為進入條件。

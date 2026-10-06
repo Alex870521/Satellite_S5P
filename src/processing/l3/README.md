@@ -28,6 +28,18 @@ detect_level(自動偵測檔案結構)
 
 **驗證**(以 HARP 為 oracle;現在是 `tests/test_l3.py::test_vs_harp_oracle`):
 - 5 軌 NO2(四季)+ 2 軌 O3 vs HARP:**r min 0.996 / mean 0.999**、bias ±0.04%、RMSE ≤4%。
+- **2026-10-06 擴充到六種 S5P 產品 × 3 個月(`tests/test_l3.py::test_vs_harp_oracle`,18 項全過)**:
+
+  | 產品 | r(三個月) | 偏差 |
+  |---|---|---|
+  | NO₂ 2024 | 0.996–0.998 | ≤ 0.12% |
+  | O₃ 2022 | 0.996–0.9997 | ≈ 0 |
+  | CO 2023 | 0.991–0.998 | ≤ 0.03% |
+  | CH₄ 2023(東亞框) | 0.9986–0.9995 | ≈ 0 |
+  | SO₂ 2024 | 0.986–0.991 | ≤ 0.82% |
+  | HCHO 2023 | 0.975–0.986 | ≤ 0.23% |
+
+  SO₂ / HCHO 較低:訊號弱、雜訊大,子點取樣與 HARP 精確多邊形面積的差異被放大;K 4 → 8 → 16 時 r 隨之上升(HCHO 0.984 → 0.990 → 0.991),確認是取樣精細度不是方法錯誤,所以測試門檻設 0.97、其餘 0.99。CH₄ 用東亞陸地框驗證:短波紅外線反演在海面與雲下無值,台灣框內兩邊都是 0 格。AER_AI 碟上無原始檔,尚未驗。
 - 覆蓋:`onlySS`(超取樣多出的格)永遠 = 0;`onlyH`(HARP 多出)平均 14.6 格(swath 最邊緣,K 提到 6 可收斂)。
 - 角點推導 vs 真 `latitude_bounds`:0.1% 無損 → 沒 bounds 的 GEMS/MODIS 一樣能用。
 
@@ -104,6 +116,35 @@ km 模式保留不動(回歸未破)。
 ### ⬜ 仍未做
 - GEMS/MODIS 無 HARP oracle → 尚未做「點落格 vs 超取樣覆蓋差」的量化自驗。
 - 舊 processor 尚未轉 deprecated shim(刻意:兩條路徑並存,還沒到淘汰時機)。
+
+## 舊路徑的退場條件(C15,2026-10-06)
+
+舊的 `SentinelProcessor` / `GEMSProcessor` / `MODISProcessor`(逐軌 RBF 內插 → 原生網格 → merge)
+與本 pipeline **刻意並存**。下面五條**全部打勾**之前,舊路徑就是活的程式,不是待清死碼 ——
+不刪、不轉 shim、不在其上做大重構(結構計畫 C16「三個 processor 掃檔統一」也因此擱置)。
+
+| # | 條件 | 現況(2026-10-06) | 驗證方式 |
+|---|---|---|---|
+| 1 | 舊 processor 處理過的**每個產品**都有 L3 adapter,且**數值上**對過參照 | 🟡 S5P:**六種產品已對 HARP 驗證**(NO2/O3/CO/CH4 r ≥ 0.99、SO2/HCHO r ≥ 0.975,偏差皆 ±1% 內,2026-10-06);**AER_AI 未驗**(碟上無原始檔)。GEMS:六項都有 adapter key,**無參照可對**。MODIS:MYD04_L2 未驗 | `tests/test_l3.py::HARP_CASES` 補齊 S5P 產品;GEMS/MODIS 至少做「點落格 vs 超取樣」覆蓋差自驗(見上一節 ⬜) |
+| 2 | `automation/run_pipeline.py` 每個 `process_data()` 都換成等價的 `process_l3()`,並**實際跑過一整年**排程 | ⬜ 仍呼叫 `process_data()`:Sentinel `:184`、MODIS `:223`(ERA5 `:303` 不在 L3 範圍,不計) | 排程改呼叫後,跑滿 12 個月沒有人工補檔 |
+| 3 | `wip_*` 沒有腳本再讀舊路徑的 processed 佈局 | ⬜ **36 個腳本**讀舊佈局(`wip_emission` 20、`wip_no2_anomaly` 10、`wip_plume` 6;樣式含 `GEMS/processed`、`processed/L2`、`merged_20…`);讀 `*_l3_02deg_*` 年檔的是 **0** | `grep -rlE "Sentinel-5P/processed\|processed/L2\|GEMS/processed\|MODIS/processed\|merged_20" wip_* --include='*.py'` 為空 |
+| 4 | 舊路徑獨有能力有新的落腳處 | ⬜ 逐站 CSV 抽取 `SentinelProcessor.process_files_to_csv`(呼叫點已註解,刻意停用)、GeoTIFF `save_as_tiff`(同)、逐檔出圖與 `GEMSProcessor.animate_month` 動畫 —— L3 都沒有 | 每項要嘛在 L3 側有等價入口,要嘛明確決定「不再需要」並記在這裡 |
+| 5 | **aero-web 網站衛星頁**不再讀舊路徑產出(2026-10-06 補) | ⬜ `aero-web-server/backend/services/satellite_raster_service.py` 直接讀:S5P `processed/L2/<產品>/` **逐軌**檔(NO2/HCHO/O3/CH4/SO2)、GEMS 逐時槽 granule(總柱量 `ColumnAmountNO2`)、MODIS `MOD04_L2`/`MYD04_L2` 年檔,並支援 `processed_<region>/` 區域資料夾。**L3 目前沒有逐軌輸出、也沒有區域資料夾**,做不出這些 | L3 先提供逐軌網格輸出(`L3Pipeline.process_file` 已能單檔處理,缺寫檔佈局);網站改讀後部署到 mini 並跑一段時間 |
+
+**為什麼條件 3 最硬**:wip 是不進版控的研究工作區,CI 看不到它;舊路徑一刪,壞的是報告圖與分析腳本,
+而且是在某天重跑時才發現。遷移 wip 時建議逐目錄做,每做完一個目錄就重跑一次它最重要的那張圖比對。
+
+**現況的實際意義:兩條路是分工,不是重複。**
+
+| 用途 | 負責 |
+|---|---|
+| 網站逐軌顯示、wip 的電廠 / 羽流 / 異常分析(原生解析度、一軌一檔) | 舊 processor |
+| 模型輸入、跨衛星與跨年比對(統一 0.02° 網格、逐日) | 本 pipeline |
+
+要讓舊路徑退場,前提是先決定 **L3 要不要也輸出逐軌檔**(條件 5);不要的話,兩條路就是長期並存,本節即是分工說明。
+
+**順序建議**(若決定走退場):1 → 4 → 5 → 3 → 2。先證明數值等價(1)、補齊能力(4),wip 才有東西可以遷(3);
+排程(2)最後換,因為它一換就開始每天產新格式的檔。
 
 ---
 

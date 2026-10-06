@@ -11,7 +11,7 @@ import glob
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, cast
 
 import numpy as np
 import pandas as pd
@@ -60,9 +60,9 @@ class GriddedNCReader:
         # 值可以是單一名字或候選 tuple(如 AER_AI 兩個波段對);依序取第一個存在的
         for cand in (want if isinstance(want, (tuple, list)) else (want,)):
             if cand and cand in ds.data_vars:
-                return cand
+                return cast(str, cand)
         # Fallback: the first/only data variable (robust for S3 / AERAOD).
-        return list(ds.data_vars)[0]
+        return str(list(ds.data_vars)[0])
 
     def iter_slices(self, product: str, start: datetime, end: datetime) -> Iterator[Slice]:
         latn_pref, lonn_pref, timen_pref = (
@@ -93,14 +93,15 @@ class GriddedNCReader:
                                     self.spec.key, product)
                 else:
                     # No time dim on the variable: take file-level time if any.
+                    ft: datetime | None          # 不和上一分支的迴圈變數 t(Timestamp)共用名字
                     if timen and timen in ds.coords:
-                        t = pd.to_datetime(ds[timen].values).ravel()[0].to_pydatetime()
+                        ft = pd.to_datetime(ds[timen].values).ravel()[0].to_pydatetime()
                     else:
-                        t = _time_from_name(path)
-                    if t is None or not (start <= t <= end):
+                        ft = _time_from_name(path)
+                    if ft is None or not (start <= ft <= end):
                         continue
                     vals = np.asarray(da.values).squeeze()
-                    yield Slice(t, vals, lats, lons, self.spec.key, product)
+                    yield Slice(ft, vals, lats, lons, self.spec.key, product)
             finally:
                 ds.close()
 

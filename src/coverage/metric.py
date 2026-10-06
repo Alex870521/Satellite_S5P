@@ -12,6 +12,7 @@ operate on already-gridded fields.
 """
 from __future__ import annotations
 
+
 import numpy as np
 
 from .region import cell_lats_2d
@@ -26,5 +27,7 @@ def cell_weights(lats: np.ndarray, lons: np.ndarray, weight: str) -> np.ndarray:
         return np.ones_like(lat2d, dtype=float)
     if weight == "area":
         lat2d = cell_lats_2d(lats, lons)
-        return np.cos(np.deg2rad(lat2d))
+        # 先放進標註變數再回傳:舊 numpy 回 Any、新 numpy 回具體型別,這樣兩邊都不報錯
+        w: np.ndarray = np.cos(np.deg2rad(lat2d))
+        return w
     raise ValueError(f"Unknown weight '{weight}'. Known: {WEIGHTS}")

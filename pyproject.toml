@@ -53,6 +53,9 @@ dev = [
     "flake8>=6.0.0",
     "black>=23.1.0",
     "mypy>=1.0.0",
+    # mypy 用的型別檔;沒有的話 pandas/pytz 被當成 Any,本機與 CI 結果會不同
+    "pandas-stubs",
+    "types-pytz",
     "isort>=5.12.0",
     "pytest>=8.3.0",
 ]
@@ -86,3 +89,25 @@ strict_optional = true
 warn_redundant_casts = true
 warn_return_any = true
 warn_unused_ignores = false
+# 型別檢查範圍(結構計畫 C14):先只守 L3 與 coverage,兩者已歸零。
+# 擴大範圍時把目錄加進 files,並把它從下面的 ignore_errors 清單移除。
+files = ["src/processing/l3", "src/coverage"]
+
+[[tool.mypy.overrides]]
+# 尚未整理型別的模組:照樣跟進 import(才知道介面),但不回報它們內部的錯。
+# 舊 processor 依 l3/README「退場條件」並存,不在其上做大修。
+module = [
+    "src.processing.sentinel_processor",
+    "src.processing.modis_processor",
+    "src.processing.gems_processor",
+    "src.processing.interpolators",
+    "src.visualization.*",
+    "src.config.richer",
+    "src.api.*",
+]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+# 沒附型別檔的第三方套件
+module = ["cartopy.*", "pyhdf.*", "geopandas.*", "shapely.*", "scipy.*"]
+ignore_missing_imports = true

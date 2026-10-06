@@ -6,23 +6,23 @@ from enum import Enum
 # 產品類型常量定義 (單一數據源，易於維護)
 # =============================================================================
 
-# 產品類型常量
-PRODUCT_TYPES = (
-    'O3____', 'O3_TCL', 'O3__PR', 'CH4___', 'CO____', 
-    'NO2___', 'HCHO__', 'SO2___', 'CLOUD_', 'FRESCO', 
-    'AER_LH', 'AER_AI'
-)
+# 先寫 Literal(型別檢查器看得懂),再用 get_args() 取出執行期的 tuple —— 仍是單一出處。
+# ⚠️ 以前是反過來 Literal[PRODUCT_TYPES]:執行時可用,但 mypy 不接受把變數塞進 Literal。
 
-# 產品級別常量
-PRODUCT_LEVELS = ('L0__', 'L1B_', 'L2__')
+# 產品類型
+ProductTypeLiteral = Literal[
+    'O3____', 'O3_TCL', 'O3__PR', 'CH4___', 'CO____',
+    'NO2___', 'HCHO__', 'SO2___', 'CLOUD_', 'FRESCO',
+    'AER_LH', 'AER_AI',
+]
+# 產品級別
+ProductLevelLiteral = Literal['L0__', 'L1B_', 'L2__']
+# 產品類別
+ProductClassLiteral = Literal['NRTI', 'OFFL', 'RPRO', 'TEST', 'OGCA', 'GSOV', 'OPER']
 
-# 產品類別常量
-PRODUCT_CLASSES = ('NRTI', 'OFFL', 'RPRO', 'TEST', 'OGCA', 'GSOV', 'OPER')
-
-# 從常量創建 Literal 類型 (提供 IDE 自動完成和類型檢查)
-ProductTypeLiteral = Literal[PRODUCT_TYPES]
-ProductLevelLiteral = Literal[PRODUCT_LEVELS]
-ProductClassLiteral = Literal[PRODUCT_CLASSES]
+PRODUCT_TYPES: tuple[str, ...] = get_args(ProductTypeLiteral)
+PRODUCT_LEVELS: tuple[str, ...] = get_args(ProductLevelLiteral)
+PRODUCT_CLASSES: tuple[str, ...] = get_args(ProductClassLiteral)
 
 # 向後兼容的類型別名
 ClassInput = ProductClassLiteral

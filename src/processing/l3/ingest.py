@@ -30,7 +30,7 @@ def _resolve_var(ds: xr.Dataset, product: ProductConfig) -> str:
     cands = [v for v in ds.data_vars if v != "count"]
     if not cands:
         raise ValueError("L3 檔找不到資料變數")
-    return cands[0]
+    return str(cands[0])
 
 
 def read_l3(nc_file: str | Path, product: ProductConfig):

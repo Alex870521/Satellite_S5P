@@ -2,7 +2,7 @@
 超取樣 binning。
 
 **HARP 不在生產路徑上** —— 它只是離線的第二意見。`SupersampleBinRegridder` 已對多軌
-多氣體驗證過(r min 0.996 / mean 0.999),生產一律走純 Python 那條;這支存在的意義是
+六種 S5P 產品驗證過(NO2/O3/CO/CH4 r ≥ 0.99、SO2/HCHO ≥ 0.975,見 tests/test_l3.py),生產一律走純 Python 那條;這支存在的意義是
 「日後改動 regridder 時,還能重新跟一個外部標準對答案」。
 
 需要 HARP CLI(本機裝在 micromamba 的隔離 env,見 `HARP_BIN`),沒裝就回 None,
@@ -37,6 +37,12 @@ HARP_VARS = {
                "O3_column_number_density_validity"),
     "SO2___": ("SO2_column_number_density",
                "SO2_column_number_density_validity"),
+    "CO____": ("CO_column_number_density",
+               "CO_column_number_density_validity"),
+    # HARP 的 CH4 ingestion 預設讀「未做偏差修正」的 methane_mixing_ratio(ingestion option
+    # ch4=bias_corrected 才換),正好就是 catalog 的 dataset_name —— 比的是同一個量。
+    "CH4___": ("CH4_column_volume_mixing_ratio_dry_air",
+               "CH4_column_volume_mixing_ratio_dry_air_validity"),
 }
 
 

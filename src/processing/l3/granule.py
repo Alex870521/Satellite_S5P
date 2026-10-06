@@ -45,8 +45,9 @@ class GridSpec:
             dlon, dlat = self.deg
             # +1e-9 讓終點含進來(等同 config.py 的 arange(..., stop + 1e-6, res) 慣例);
             # round 到 6 位小數消掉 arange 的浮點尾巴,確保逐格值可重現。
-            self._lon_arr = np.round(np.arange(lon_min, lon_max + 1e-9, dlon), 6)
-            self._lat_arr = np.round(np.arange(lat_min, lat_max + 1e-9, dlat), 6)
+            # 度數模式存精確陣列;公里模式改走 GridFrame,這兩個是 None
+            self._lon_arr: np.ndarray | None = np.round(np.arange(lon_min, lon_max + 1e-9, dlon), 6)
+            self._lat_arr: np.ndarray | None = np.round(np.arange(lat_min, lat_max + 1e-9, dlat), 6)
             self._gf = None
             if self.resolution is None:                 # 補等效 km,供 writer metadata
                 center_lat = (lat_min + lat_max) / 2
@@ -69,11 +70,17 @@ class GridSpec:
 
     @property
     def lat(self) -> np.ndarray:
-        return self._lat_arr if self._gf is None else self._gf.lat
+        if self._gf is not None:
+            return self._gf.lat
+        assert self._lat_arr is not None      # 度數模式由 __post_init__ 保證
+        return self._lat_arr
 
     @property
     def lon(self) -> np.ndarray:
-        return self._lon_arr if self._gf is None else self._gf.lon
+        if self._gf is not None:
+            return self._gf.lon
+        assert self._lon_arr is not None
+        return self._lon_arr
 
     @staticmethod
     def _edges(c: np.ndarray) -> np.ndarray:

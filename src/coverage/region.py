@@ -11,6 +11,8 @@ pays the point-in-polygon cost once.
 """
 from __future__ import annotations
 
+from typing import cast
+
 from pathlib import Path
 
 import numpy as np
@@ -62,7 +64,7 @@ def region_mask(lats: np.ndarray, lons: np.ndarray, region: str,
     """Boolean mask (same shape as the value field) of cells inside *region*."""
     cache_key = (signature, region)
     if cache_key in _mask_cache:
-        return _mask_cache[cache_key]
+        return cast(np.ndarray, _mask_cache[cache_key])
 
     lat2d, lon2d = _grid_2d(lats, lons)
 
@@ -81,10 +83,10 @@ def region_mask(lats: np.ndarray, lons: np.ndarray, region: str,
             f"zones: {sorted(AIR_QUALITY_ZONES)}")
 
     _mask_cache[cache_key] = mask
-    return mask
+    return cast(np.ndarray, mask)
 
 
 def cell_lats_2d(lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
     """Latitude of every cell (for area weighting)."""
     lat2d, _ = _grid_2d(lats, lons)
-    return lat2d
+    return cast(np.ndarray, lat2d)
