@@ -142,7 +142,7 @@ gf = pipe.process_file(raw_nc, out_nc="out.nc")             # → GriddedField(v
 
 ## Gotchas / 注意
 - **HARP = oracle only**,不是 pipeline 依賴;沒裝 HARP 也能跑完整 pipeline。
-- **raw 路徑已重組(2026-06-09)**:`/Volumes/Transcend/Sentinel-5P/raw/L2/<species>/<year>/<month>/`
+- **raw 路徑已重組(2026-06-09)**:`<BASE_DIR>/Sentinel-5P/raw/L2/<species>/<year>/<month>/`
   (多一層 `L2/`;舊 `raw/NO2___/...` 已不在,`processed/` 也清空)。勿 hardcode 舊路徑。
 - **HARP oracle 設定**:`brew install micromamba` → `micromamba create -n harp -c conda-forge harp`
   (這台無 conda;PyPI `harp` 是別的套件,別 pip 裝)。

@@ -1,7 +1,7 @@
 # Satellite_S5P 結構審視與優化計畫(2026-09-09)
 
 > 狀態:**草案,未 commit**。基準 `main @ e20aec7`(領先 origin 16 個 commit)。
-> **2026-09-10 進度:Phase 3(C12/C11/C9)全部完成,未 commit;附帶抓到 B24(S5P 檔名 regex 抓到結束時間)並修。**
+> **2026-09-10 進度:Phase 3(C12/C11/C9)全部完成並 commit(3805b74/08895bd/4cde537);附帶抓到 B24(S5P 檔名 regex 抓到結束時間)並修。**
 > **2026-09-09 進度:Phase 0 + Phase 1 全部 10 項已完成並 commit(9ca01d1 / 34bf4be / 78daa29);同環境測試 39 passed / 31 skipped / 0 fail(Transcend 已拔,基準隨之調整)。**
 > 由一次唯讀審視產生(codebase-health agent 深度掃描 + 人工抽驗),**沒有改任何程式**。
 > 三個問題需要 repo 擁有者先拍板(§4),其餘可依 §5 的順序執行。
@@ -120,8 +120,8 @@
 
 ### 中風險,需要測試護欄(每項都是「先寫測試、再改」)
 
-- **C3 統一 AER_AI 變數名** —— **先拍板 D1**。決定後只改 `catalog.py:279` 或 `registry.py:60` 一處。改 catalog → 既有已處理檔變數名與新檔不一致,要一併決定重跑;改 registry → 既有檔立刻能被 coverage 讀到。驗證:對一個既有 AER_AI processed 檔跑 `python -m src.coverage --hub sentinel5p --product AER_AI`。
-- **C10 GEMS 產品設定收斂到 catalog** —— **先拍板 D2**。`gems_processor.py:45-58` 改查 `PRODUCT_CONFIGS`;processor 獨有的科學設定(O3T 200/400、HCHO/SO2/AERAOD/UVI 四項)搬進 catalog。`wip_gems_tropomi/` 走 l3 adapter(已用 catalog)不受影響;舊 processor 圖色階會變。驗證:**改之前**先把兩份設定差異釘成 `test_gems_config_matches_catalog`,收斂後每個欄位都是刻意值。
+- **C3 ✅ 統一 AER_AI 變數名** —— D1 拍板:**兩個波段對都保留**。決定後只改 `catalog.py:279` 或 `registry.py:60` 一處。改 catalog → 既有已處理檔變數名與新檔不一致,要一併決定重跑;改 registry → 既有檔立刻能被 coverage 讀到。驗證:對一個既有 AER_AI processed 檔跑 `python -m src.coverage --hub sentinel5p --product AER_AI`。
+- **C10 ✅ GEMS 產品設定收斂到 catalog** —— D2 拍板:**六項全保留、O3T 200/400 保留**。`gems_processor.py:45-58` 改查 `PRODUCT_CONFIGS`;processor 獨有的科學設定(O3T 200/400、HCHO/SO2/AERAOD/UVI 四項)搬進 catalog。`wip_gems_tropomi/` 走 l3 adapter(已用 catalog)不受影響;舊 processor 圖色階會變。驗證:**改之前**先把兩份設定差異釘成 `test_gems_config_matches_catalog`,收斂後每個欄位都是刻意值。
 - **C12 ✅ 抽掉 `_pick` 與 GEMS regex 的重複**。`_pick` 抽到 `src/utils/nc_names.py`;三份 GEMS regex 收斂成呼叫 `extract_datetime_from_filename`。`l3/adapters/gems.py` 是 wip 重度依賴,但 `read()` 簽名與行為不變。驗證:**先**為 `extract_datetime_from_filename` 補測試(S5P/MODIS/GEMS 三種檔名)—— 它零測試卻是 L3 聚合的隱含前提。
 - **C11 ✅ 靜默失敗變有訊息**。`sentinel_processor.py:461` 裸 except 具名 + log;`pipeline.py:137` 排序退化發 warning;`regridder.py:68-71` 全 NaN 場加 debug log;`core.py:204,253` 具名。四檔各約三行,l3 行為不變。驗證:餵一個檔名日期壞掉的檔進 `aggregate`,要看到 warning。
 - **C9 ✅ 讓 `l3_regrid_year.py` 真的走 `regrid_to_series`**(B5 收斂)。`main` 改呼叫 runner、刪 `_make_adapter` 改用 `runner.make_adapter`、`BOUNDS` 改 `runner.DEFAULT_BOUNDS`;`_discover` 保留(`tests/test_l3.py` import 它)。驗證:**先**加測試對同一批 fixture 分別走 CLI 與 `regrid_to_series`,斷言輸出 nc 的變數/attrs/數值完全相同,通過後再重構。
@@ -138,11 +138,11 @@
 
 ## 4. 待拍板
 
-**D1 AER_AI 要用哪個波段對?** `340_380`(processor 實際寫進檔案的)或 `354_388`(coverage 期待的)。兩者科學意義不同。也決定既有 AER_AI 處理檔要不要重跑。→ 影響 C3 是改一行還是重跑一批。
+**D1 ✅(2026-09-20:都保留)AER_AI 要用哪個波段對?** `340_380`(processor 實際寫進檔案的)或 `354_388`(coverage 期待的)。兩者科學意義不同。也決定既有 AER_AI 處理檔要不要重跑。→ 影響 C3 是改一行還是重跑一批。
 
-**D2 GEMS 產品清單以哪份為準?** catalog 沒有的 HCHO / SO2 / AERAOD / UVI 四項是還在用還是已停用?O3T 的 `200/400` 是刻意的科學選擇要保留,還是舊值?→ 影響 C10。
+**D2 ✅(2026-09-20:六項全保留,O3T 200/400 保留)GEMS 產品清單以哪份為準?** catalog 沒有的 HCHO / SO2 / AERAOD / UVI 四項是還在用還是已停用?O3T 的 `200/400` 是刻意的科學選擇要保留,還是舊值?→ 影響 C10。
 
-**D3 CI 要擋到什麼程度?** 只跑測試 / 測試 + lint / 再加 mypy。建議:先只擋測試(C1),mypy 限 `l3/` 與 `coverage/` 並 `continue-on-error`(C14)。→ 動 CI,會改變 PR 流程。
+**D3 ✅(以 C1 最保守選項定案:只擋測試;mypy 留 C14)CI 要擋到什麼程度?** 只跑測試 / 測試 + lint / 再加 mypy。建議:先只擋測試(C1),mypy 限 `l3/` 與 `coverage/` 並 `continue-on-error`(C14)。→ 動 CI,會改變 PR 流程。
 
 ---
 
@@ -150,9 +150,9 @@
 
 ```
 Phase 0  護欄(需 D3)          C1                                  ✅ 2026-09-09(採最保守選項:只跑測試)
-Phase 1  低風險一批            C7 C19 C2 C4 C5 C6 C8 C20 C13     ✅ 2026-09-09 全部完成,未 commit
-Phase 2  需先拍板              C3(D1) C10(D2)
-Phase 3  先寫測試再改          C12 ✅ → C11 ✅ → C9 ✅          2026-09-10 全部完成,未 commit
+Phase 1  低風險一批            C7 C19 C2 C4 C5 C6 C8 C20 C13     ✅ 2026-09-09 完成,commit 9ca01d1/34bf4be/78daa29
+Phase 2  需先拍板              C3 ✅ C10 ✅                      2026-09-20 拍板「變數都保留給使用者」後完成,未 commit
+Phase 3  先寫測試再改          C12 ✅ → C11 ✅ → C9 ✅          2026-09-10 完成,commit 3805b74/08895bd/4cde537
 Phase 4  大項,各自獨立 session  C15(文件) C16 C17(D) C18 C14(D3)
 ```
 
@@ -174,7 +174,10 @@ Phase 1 全部不改變任何輸出數值;Phase 3 每項都以「新增的測試
 | C20 | `name = "satellite-s5p"`、authors = GitHub handle + email(要改真名說一聲) | `tomllib` 讀回 |
 | **C12** | 先寫 `tests/test_utils_names.py`(13 項:S5P/MODIS/GEMS 檔名、時區、None、wrapper 契約、`pick_name`);`_pick` 抽到 `src/utils/nc_names.py`,兩處改 import;GEMS 兩個 wrapper 委派 `extract_datetime_from_filename`(無效日期仍回 None);移除兩個無用 `import re` | 新測試 13 passed;全套 46/37/0(無碟基準)|
 | **C11** | 先寫 `tests/test_error_reporting.py`(4 項,caplog 斷言);`pipeline._name_sort_key` 退化發 warning(module logger);`regridder` 角點失敗空場 debug log;`core.py` 兩個裸 except 具名 + warning(module logger,不依賴 self.logger 順序);`sentinel_processor` 裸 except 具名 + `self.logger.warning`(存在檢查)| 4 passed;全套 50/37/0 |
-| **C9** | 先寫 `tests/test_cli_regrid.py`(3 結構測試 monkeypatch `BASE_DIRS`/`_discover`/`regrid_to_series`;1 golden 標 `requires_data`,數字取自 2026-08-05 重構前實跑);`runner.regrid_to_series` 自己統計 `n_skipped` 寫進 attrs 與回傳;CLI `main` 改呼叫 runner,刪 `_make_adapter`/`BOUNDS` 副本,`BASE_DIRS` 抽成模組常數 | 3 passed + 1 skip(無碟);全套 53/38/0。**⚠️ golden 尚未在有碟環境跑過**:接碟後 `pytest tests/test_cli_regrid.py -m requires_data` 一次即可 |
+| **C9** | 先寫 `tests/test_cli_regrid.py`(3 結構測試 monkeypatch `BASE_DIRS`/`_discover`/`regrid_to_series`;1 golden 標 `requires_data`,數字取自 2026-08-05 重構前實跑);`runner.regrid_to_series` 自己統計 `n_skipped` 寫進 attrs 與回傳;CLI `main` 改呼叫 runner,刪 `_make_adapter`/`BOUNDS` 副本,`BASE_DIRS` 抽成模組常數 | 3 passed + 1 skip(無碟);全套 53/38/0。**✅ golden 已於 2026-09-20 接碟跑過:PASSED**,重構後 CLI 對真實 GEMS 3 檔的輸出與 8/5 重構前逐項一致(251×201、finite 0.360、range 2.5e12~2.19e16);有碟全套 83/8/0 |
+
+| **C3** | `ProductConfig` 加 `alt_dataset_names`;catalog `AER_AI` 預設仍 340_380(既有檔相容)+ alt 354_388;`SentinelProcessor(variable=…)` + `dataset_name` property(6 處呼叫改用,含寫檔 key 與 GeoTIFF);registry 值改候選 tuple、reader `_resolve_var` 依序取第一個存在的 | `test_product_configs.py` AER_AI 5 項 |
+| **C10** | catalog 補 `GEMS_HCHO/SO2/AERAOD/UVI`、`GEMS_O3T` 改 200/400/viridis(processor 原值);`gems_processor.PRODUCTS` 改成 `PRODUCT_KEYS` 查表(友善名介面不變);runner `GEMS_RAW_DIR`/`SHORT_NAME` 補四項 | 先寫 golden(六項原值)再改,16 項;全套 104/8/0 |
 
 ★ **C12 的測試先跑就抓到一個真 bug(B24,新)**:`extract_datetime_from_filename` 的 S5P regex
 `S5P_\w+_\w+__\w+_+(\d{8}T\d{6})_` 因 `\w` 含底線、貪婪回溯從最長開始,實際抓到的是**結束時間**

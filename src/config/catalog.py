@@ -41,6 +41,9 @@ class ProductConfig:
     cmap: str = 'viridis'  # 預設色階
     # 新增：網格解析度配置（基於 Sentinel-5P 2019/8/6 後官方規格）
     resolution: Optional[Tuple[float, float]] = None  # (x_km, y_km) 解析度，None 表示使用預設值
+    # 同一原始檔內可改選的其他變數(例 AER_AI 的另一個波段對)。預設 dataset_name 維持既有
+    # 已處理檔的名字;使用者要另一個就用 processor 的 variable= 指定。(D1:兩個都保留)
+    alt_dataset_names: Tuple[str, ...] = ()
 
 
 class ProductType(str, Enum):
@@ -281,7 +284,8 @@ PRODUCT_CONFIGS: dict[str, ProductConfig] = {
         units=f'Aerosol Index',
         title=f'Aerosol Index',
         cmap='viridis',
-        resolution=(5.5, 3.5)  # AER (AI): 5.5km x 3.5km
+        resolution=(5.5, 3.5),  # AER (AI): 5.5km x 3.5km
+        alt_dataset_names=('aerosol_index_354_388',),   # 另一波段對;coverage/registry 也認這兩個
     ),
     # --- 非 Sentinel-5P 的產品(L3 pipeline 需要同一份 metadata 真相) ---
     'MCD19A2': ProductConfig(
@@ -344,10 +348,47 @@ PRODUCT_CONFIGS: dict[str, ProductConfig] = {
     'GEMS_O3T': ProductConfig(
         display_name='O₃',
         dataset_name='ColumnAmountO3',
-        vmin=None, vmax=None,
+        vmin=200, vmax=400,
         units='O$_3$ Total Column (DU)',
         title='GEMS O$_3$ Total Column',
+        cmap='viridis',
+        resolution=(8.0, 3.5)
+    ),
+    # ── 以下四項自 gems_processor.PRODUCTS 搬入(C10 收斂;D2:六項全保留)──
+    'GEMS_HCHO': ProductConfig(
+        display_name='HCHO',
+        dataset_name='ColumnAmountHCHO',
+        vmin=0, vmax=2.0e16,
+        units='HCHO Column (molecules cm$^{-2}$)',
+        title='GEMS HCHO Column',
         cmap='turbo',
+        resolution=(8.0, 3.5)
+    ),
+    'GEMS_SO2': ProductConfig(
+        display_name='SO₂',
+        dataset_name='ColumnAmountSO2',
+        vmin=0, vmax=1.0e16,
+        units='SO$_2$ Column (molecules cm$^{-2}$)',
+        title='GEMS SO$_2$ Column',
+        cmap='turbo',
+        resolution=(8.0, 3.5)
+    ),
+    'GEMS_AERAOD': ProductConfig(
+        display_name='AOD',
+        dataset_name='FinalAerosolOpticalDepth',
+        vmin=0, vmax=2.0,
+        units='Aerosol Optical Depth (unitless)',
+        title='GEMS Aerosol Optical Depth',
+        cmap='YlOrBr',
+        resolution=(8.0, 3.5)
+    ),
+    'GEMS_UVI': ProductConfig(
+        display_name='UVI',
+        dataset_name='UVIndex',
+        vmin=0, vmax=12,
+        units='UV Index (unitless)',
+        title='GEMS UV Index',
+        cmap='magma',
         resolution=(8.0, 3.5)
     ),
 }

@@ -26,17 +26,28 @@ from src.config.catalog import PRODUCT_CONFIGS
 
 BOUNDS = (119.0, 123.0, 21.0, 26.0)
 
-# 真實資料樣本(跨兩顆碟);不存在就 skip
+# 真實資料樣本:相對於 DATA_ROOTS 的任何一個根目錄去找,找不到就 skip。
+# (資料可能散在多顆碟,而且碟名因人而異 → 不要寫死掛載點,用 SATELLITE_DATA_ROOTS 指定。)
+from src.config.settings import DATA_ROOTS
+
 SAMPLES = {
-    "s5p": ("NO2___", "/Volumes/Transcend/Sentinel-5P/raw/L2/NO2___/2024/*/*.nc"),
-    "modis": ("MCD19A2", "/Volumes/Transcend/MODIS/raw/MCD19A2/2023/01/*.hdf"),
-    "gems": ("GEMS_NO2", "/Volumes/TOSHIBA/GEMS/raw/NO2/*/*/*.nc"),
+    "s5p": ("NO2___", "Sentinel-5P/raw/L2/NO2___/2024/*/*.nc"),
+    "modis": ("MCD19A2", "MODIS/raw/MCD19A2/2023/01/*.hdf"),
+    "gems": ("GEMS_NO2", "GEMS/raw/NO2/*/*/*.nc"),
 }
 
 
+def _glob_roots(rel_pattern):
+    """在每個資料根目錄底下找;回傳第一個有命中的完整 glob 結果。"""
+    for root in DATA_ROOTS:
+        hits = [f for f in sorted(glob.glob(str(root / rel_pattern))) if "/._" not in f]
+        if hits:
+            return hits
+    return []
+
+
 def _first_sample(key):
-    _, pattern = SAMPLES[key]
-    fs = [f for f in sorted(glob.glob(pattern)) if "/._" not in f]
+    fs = _glob_roots(SAMPLES[key][1])
     return fs[0] if fs else None
 
 
@@ -350,8 +361,8 @@ class TestRealData:
     # 多氣體 × 多軌:沿用 wip_l3/validate_supersample.py 的覆蓋面
     # (實測 r min 0.996 / mean 0.999;HCHO 尚未驗過,見 l3/README)
     HARP_CASES = [
-        ("NO2___", "/Volumes/Transcend/Sentinel-5P/raw/L2/NO2___/{ym}/*.nc"),
-        ("O3____", "/Volumes/Transcend/Sentinel-5P/raw/L2/O3____/{ym}/*.nc"),
+        ("NO2___", "Sentinel-5P/raw/L2/NO2___/{ym}/*.nc"),
+        ("O3____", "Sentinel-5P/raw/L2/O3____/{ym}/*.nc"),
     ]
 
     @pytest.mark.parametrize("product,pattern", HARP_CASES)
@@ -362,7 +373,7 @@ class TestRealData:
         from src.processing.l3.runner import make_adapter
         if not harp_available():
             pytest.skip("HARP CLI 未安裝(micromamba create -n harp -c conda-forge harp)")
-        fs = [f for f in sorted(glob.glob(pattern.format(ym=ym))) if "/._" not in f]
+        fs = _glob_roots(pattern.format(ym=ym))
         if not fs:
             pytest.skip(f"找不到 {product} {ym} 的樣本檔")
         grid = GridSpec(resolution=(5.5, 3.5))          # 用 km 網格對齊 HARP 驗證慣例

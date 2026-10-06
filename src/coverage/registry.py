@@ -57,7 +57,9 @@ _S5P_VARS = {
     "HCHO__": "formaldehyde_tropospheric_vertical_column",
     "CH4___": "methane_mixing_ratio",
     "CO____": "carbonmonoxide_total_column",
-    "AER_AI": "aerosol_index_354_388",
+    # 兩個波段對都是真實變數(D1 拍板:都保留);tuple = 讀檔時依序找第一個存在的。
+    # 順序與 catalog 一致:340_380 是既有已處理檔用的名字。
+    "AER_AI": ("aerosol_index_340_380", "aerosol_index_354_388"),
 }
 
 _GEMS_VARS = {

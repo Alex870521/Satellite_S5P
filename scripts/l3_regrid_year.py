@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+import os
+
 import argparse
 import glob
 import sys
@@ -25,12 +27,14 @@ import time
 from pathlib import Path
 
 
+from src.config.settings import DATA_ROOTS
 from src.processing.l3.runner import (DEFAULT_BOUNDS, GEMS_RAW_DIR, SHORT_NAME,
                                       regrid_to_series)
 
-# 外接碟根目錄;測試用 monkeypatch 換掉
-BASE_DIRS = [Path("/Volumes/Transcend"), Path("/Volumes/TOSHIBA")]
-LOCAL_WORK = Path("/Users/chanchihyu/Satellite/Data")
+# 資料根目錄(可跨碟,見 settings.DATA_ROOTS);測試用 monkeypatch 換掉
+BASE_DIRS = list(DATA_ROOTS)
+# 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
+LOCAL_WORK = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "Satellite/Data"))
 
 # source → (raw glob 樣板, adapter 工廠, 輸出短變數名)
 PREFIX = {"s5p": "S5P", "modis": "MODIS", "gems": "GEMS"}

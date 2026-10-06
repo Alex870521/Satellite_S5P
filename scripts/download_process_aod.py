@@ -10,6 +10,8 @@ MODIS hdf 很小（~5MB/檔、~4.6GB/年），下載到 Transcend MODIS raw，
   python -m scripts.download_process_aod --year 2025 --start-month 7   # 只補 7–12 月再處理全年
 """
 from __future__ import annotations
+
+import os
 import argparse
 import logging
 import shutil
@@ -24,7 +26,8 @@ from src.processing.modis_processor import MODISProcessor
 
 # earthaccess bounding_box 順序：(min_lon, min_lat, max_lon, max_lat)
 BOUNDARY = (119, 21, 123, 26)
-LOCAL = Path("/Users/chanchihyu/Satellite/Data")
+# 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
+LOCAL = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "Satellite/Data"))
 
 
 def main():

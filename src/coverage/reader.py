@@ -57,8 +57,10 @@ class GriddedNCReader:
     # -- slice streaming ----------------------------------------------------
     def _resolve_var(self, ds: xr.Dataset, product: str) -> str:
         want = self.spec.variables.get(product)
-        if want and want in ds.data_vars:
-            return want
+        # 值可以是單一名字或候選 tuple(如 AER_AI 兩個波段對);依序取第一個存在的
+        for cand in (want if isinstance(want, (tuple, list)) else (want,)):
+            if cand and cand in ds.data_vars:
+                return cand
         # Fallback: the first/only data variable (robust for S3 / AERAOD).
         return list(ds.data_vars)[0]
 

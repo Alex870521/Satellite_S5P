@@ -29,7 +29,22 @@ class SentinelProcessor:
         'O3_PROFILE': (30.0, 30.0), # O₃ (profile): 30km x 30km
     }
     
-    def __init__(self, interpolation_method='rbf', resolution=None, mask_qc_value=0.5, file_type=None, bounds=None):
+    @property
+    def dataset_name(self) -> str:
+        """實際要讀 / 寫的變數名。
+
+        預設是 catalog 的 ``dataset_name``(與既有已處理檔相容);使用者可用 ``variable=``
+        改選該產品 ``alt_dataset_names`` 之一 —— AER_AI 的兩個波段對就是這樣都保留(D1)。
+        """
+        cfg = PRODUCT_CONFIGS[self.file_type]
+        if self.variable is None:
+            return cfg.dataset_name
+        allowed = (cfg.dataset_name, *cfg.alt_dataset_names)
+        if self.variable not in allowed:
+            raise ValueError(f"{self.file_type} 的 variable 只能是 {allowed},得到 {self.variable!r}")
+        return self.variable
+
+    def __init__(self, interpolation_method='rbf', resolution=None, mask_qc_value=0.5, file_type=None, bounds=None, variable=None):
         """初始化處理器
 
         Parameters:
@@ -50,6 +65,7 @@ class SentinelProcessor:
         self.geotiff_dir = None
         self.logger = None
         self.file_type = file_type
+        self.variable = variable          # None = catalog 預設;可改選 alt_dataset_names 之一
         self.file_class = None
 
         self.interpolation_method = interpolation_method
@@ -84,7 +100,7 @@ class SentinelProcessor:
         """
         # 初始處理
         time = np.datetime64(dataset.time.values[0], 'D')
-        attributes = PRODUCT_CONFIGS[self.file_type].dataset_name
+        attributes = self.dataset_name
 
         # 如果提供了範圍，進行過濾
         if extract_range is not None:
@@ -286,7 +302,7 @@ class SentinelProcessor:
             ds = xr.open_dataset(nc_file)
 
             # 獲取數據變量名
-            var_name = PRODUCT_CONFIGS[self.file_type].dataset_name
+            var_name = self.dataset_name
 
             if var_name not in ds:
                 self.logger.warning(f"Variable {var_name} not found in {nc_file}")
@@ -587,7 +603,7 @@ class SentinelProcessor:
                 # 生成文件名
                 start_str = df['time'].min().strftime('%Y%m%d')
                 end_str = df['time'].max().strftime('%Y%m%d')
-                var_name = PRODUCT_CONFIGS[self.file_type].dataset_name
+                var_name = self.dataset_name
 
                 if extract_surrounding:
                     output_filename = f"{self.file_type}_{var_name}_stations_3x3_{start_str}_{end_str}.csv"
@@ -685,7 +701,7 @@ class SentinelProcessor:
             print(f"Data variables: {list(ds.data_vars.keys())}")
 
             # 檢查主要變量
-            var_name = PRODUCT_CONFIGS[self.file_type].dataset_name
+            var_name = self.dataset_name
             if var_name in ds:
                 var_data = ds[var_name]
                 print(f"\n=== Variable '{var_name}' ===")
@@ -820,7 +836,7 @@ class SentinelProcessor:
                     f" 可處理的產品:{sorted(PRODUCT_CONFIGS)}")
             return xr.Dataset(
                 {
-                    PRODUCT_CONFIGS[self.file_type].dataset_name: (
+                    self.dataset_name: (
                         ['time', 'latitude', 'longitude'],
                         var_grid[np.newaxis, :, :]
                     )
@@ -1005,7 +1021,7 @@ class SentinelProcessor:
         """將 NetCDF 數據集中的 NO2 數值儲存為 GeoTIFF"""
         try:
             # 獲取變數名稱和數據
-            var_name = PRODUCT_CONFIGS[self.file_type].dataset_name
+            var_name = self.dataset_name
             da = ds[var_name].isel(time=0)
 
             # 設定地理資訊

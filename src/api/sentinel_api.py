@@ -218,6 +218,29 @@ class SentinelHubBase(SatelliteHub):
             self.logger.error(f"Error in fetch_no2_data: {str(e)}")
             raise
 
+    # 超過這個量才建議改走 S3（小批下載沒必要多設一組金鑰）
+    _S3_HINT_BYTES = 20 * 1024 ** 3
+    _s3_hint_shown = False
+
+    def _suggest_s3(self, nbytes: int) -> None:
+        """大量下載但沒設 S3 金鑰時提醒一次。
+
+        OData/zipper 只允許 4 條並行,超過會回 429,而重試退避會讓吞吐雪崩
+        (2026-09-22 實測:開 8 條先衝到 85 MB/s,接著一小時只剩 2 MB/s)。
+        S3 端點額度獨立、單條快得多,而且兩邊可以同時跑。
+        """
+        if SentinelHubBase._s3_hint_shown or nbytes < self._S3_HINT_BYTES:
+            return
+        if os.getenv('S3_ACCESS_KEY') and os.getenv('S3_SECRET_KEY'):
+            return
+        SentinelHubBase._s3_hint_shown = True
+        self.logger.info(
+            f"about to download {nbytes / 1024 ** 3:.0f} GB over OData, which is capped at 4 "
+            "concurrent connections (more => HTTP 429). The S3 endpoint has a separate quota and "
+            "is several times faster: get keys at https://eodata-s3keysmanager.dataspace.copernicus.eu, "
+            "put S3_ACCESS_KEY / S3_SECRET_KEY in .env (see README). Both routes can run at once."
+        )
+
     def download_data(self, products: list, show_progress=False):
         """並行下載多個產品（ThreadPoolExecutor）。
 
@@ -233,6 +256,8 @@ class SentinelHubBase(SatelliteHub):
         if not products:
             self.logger.warning("No products to download")
             return
+
+        self._suggest_s3(sum(p.get('ContentLength', 0) for p in products))
 
         # 初始化下載統計
         self.download_stats.update({

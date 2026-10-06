@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """下載環境部測站逐時值(aqx_p_488),輸出成模型讀得懂的每站 CSV。
 
-輸出到 /Users/chanchihyu/Satellite/Data/stations_<year>/<year>/<站名>_aqx_p_488_<起>_<迄>.csv
+輸出到 $LOCAL_WORK_DIR/stations_<year>/<year>/<站名>_aqx_p_488_<起>_<迄>.csv（預設 ~/Satellite/Data）
 —— 檔名格式與既有年份一致,`cnn/ground.py` 與 `cnn/data.py` 用
 `*_aqx_p_488_*.csv` 這個 glob 抓檔,所以日期後綴不影響下游。
 
@@ -35,11 +35,13 @@ from pathlib import Path
 import pandas as pd
 
 # 權威的 TLS 處理在 aero-web-server,不複製一份 —— 複製容易被後人簡化成關掉驗證
-AERO_WEB = Path("/Users/chanchihyu/PycharmProjects/aero-web-server")
+# aero-web-server 的 checkout 位置（借它的測站清單）。可用 AERO_WEB_DIR 覆寫。
+AERO_WEB = Path(os.getenv("AERO_WEB_DIR", Path.home() / "PycharmProjects/aero-web-server"))
 if str(AERO_WEB) not in sys.path:
     sys.path.insert(0, str(AERO_WEB))
 
-OUT_ROOT = Path("/Users/chanchihyu/Satellite/Data")
+# 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
+OUT_ROOT = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "Satellite/Data"))
 API = "https://data.moenv.gov.tw/api/v2/aqx_p_488"
 PAGE = 1000
 

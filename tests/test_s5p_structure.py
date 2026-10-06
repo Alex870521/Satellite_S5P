@@ -19,15 +19,21 @@ import pytest
 
 from src.config.catalog import PRODUCT_CONFIGS
 
+from src.config.settings import DATA_ROOTS
+
 PRODUCTS = ["NO2___", "O3____", "SO2___", "HCHO__"]
-RAW_GLOB = "/Volumes/*/Sentinel-5P/raw/L2/{product}/*/*/*.nc"
+# 相對於 DATA_ROOTS 找。以前是 "/Volumes/*/..." 掃所有掛載碟,會連不相干的隨身碟
+# 一起掃,而且在非 macOS 上根本沒有 /Volumes。
+RAW_REL = "Sentinel-5P/raw/L2/{product}/*/*/*.nc"
 
 
 def _sample(product):
-    fs = [f for f in sorted(glob.glob(RAW_GLOB.format(product=product))) if "/._" not in f]
-    if not fs:
-        pytest.skip(f"{product}: 找不到 raw 樣本(外接碟未掛載?)")
-    return fs[0]
+    for root in DATA_ROOTS:
+        fs = [f for f in sorted(glob.glob(str(root / RAW_REL.format(product=product))))
+              if "/._" not in f]
+        if fs:
+            return fs[0]
+    pytest.skip(f"{product}: 在 DATA_ROOTS 裡找不到 raw 樣本(外接碟未掛載?)")
 
 
 @pytest.mark.requires_data

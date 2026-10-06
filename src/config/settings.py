@@ -24,9 +24,17 @@ CHUNK_SIZE = 8192
 DEFAULT_TIMEOUT = 60
 DOWNLOAD_TIMEOUT = 180
 
-# 存儲路徑：可用環境變數 SATELLITE_BASE_DIR 覆寫（建議寫在 .env）。
-# 預設沿用外接碟；換機器只要設 SATELLITE_BASE_DIR，不需改碼。
-BASE_DIR = Path(os.getenv("SATELLITE_BASE_DIR", "/Volumes/Transcend"))
+# 存儲路徑：一律由環境變數 SATELLITE_BASE_DIR 決定（建議寫在 .env）。
+# 預設是 repo 底下的 ./data，好讓剛 clone 的人跑得起來；實務上資料量是 TB 級，
+# 請指到外接碟。⚠️ 以前這裡預設某顆外接碟的掛載點，那顆沒插時每個 hub 的
+# constructor 都會在建資料夾時就炸掉，而且換機器的人完全看不懂為什麼。
+BASE_DIR = Path(os.getenv("SATELLITE_BASE_DIR", Path(__file__).resolve().parents[2] / "data"))
+
+# 資料可能散在多顆碟(例如舊年份留在封存碟、新年份寫在工作碟)。
+# SATELLITE_DATA_ROOTS 用 os.pathsep 分隔,例如 "/Volumes/A:/Volumes/B";未設就只有 BASE_DIR。
+# 需要「跨碟找同一個產品」的程式(l3_regrid_year、吃真實資料的測試)請用這個,不要寫死掛載點。
+# 空字串視同未設(否則會得到 [],l3_regrid_year 就以為一顆碟都沒有)
+DATA_ROOTS = [Path(x) for x in (os.getenv("SATELLITE_DATA_ROOTS") or str(BASE_DIR)).split(os.pathsep) if x]
 
 
 # 地理範圍設定 (min_lon, max_lon, min_lat, max_lat)

@@ -18,7 +18,7 @@ import xarray as xr
 from src.processing.interpolators import DataInterpolator
 from src.processing.grid_frame import GridFrame
 from src.config.settings import FIGURE_BOUNDARY
-from src.config.catalog import ProductConfig
+from src.config.catalog import PRODUCT_CONFIGS, ProductConfig
 from src.utils.extract_datetime_from_filename import extract_datetime_from_filename
 from src.visualization.plot_nc import plot_global_var
 from src.visualization.gif import animate_data
@@ -42,20 +42,11 @@ class GEMSProcessor:
     GEO_GROUP = "Geolocation Fields"
 
     # 友善名稱 -> 產品設定。dataset_name = Data Fields 內的變數名（也是輸出網格變數名）。
-    PRODUCTS: dict[str, ProductConfig] = {
-        'NO2': ProductConfig('NO₂', 'ColumnAmountNO2', 0, 1.0e16, 'molecules cm-2',
-                             'GEMS NO₂ Total Column', cmap='turbo'),
-        'O3T': ProductConfig('O₃', 'ColumnAmountO3', 200, 400, 'DU',
-                             'GEMS O₃ Total Column', cmap='viridis'),
-        'HCHO': ProductConfig('HCHO', 'ColumnAmountHCHO', 0, 2.0e16, 'molecules cm-2',
-                              'GEMS HCHO Column', cmap='turbo'),
-        'SO2': ProductConfig('SO₂', 'ColumnAmountSO2', 0, 1.0e16, 'molecules cm-2',
-                             'GEMS SO₂ Column', cmap='turbo'),
-        'AERAOD': ProductConfig('AOD', 'FinalAerosolOpticalDepth', 0, 2.0, 'unitless',
-                                'GEMS Aerosol Optical Depth', cmap='YlOrBr'),
-        'UVI': ProductConfig('UVI', 'UVIndex', 0, 12, 'unitless',
-                             'GEMS UV Index', cmap='magma'),
-    }
+    # 產品設定的單一真相在 src/config/catalog.py(C10 收斂;D2 拍板六項全保留)。
+    # 這裡只留「友善名 → catalog key」的對應,使用者介面(file_type='NO2' 等)不變。
+    PRODUCT_KEYS = {'NO2': 'GEMS_NO2', 'O3T': 'GEMS_O3T', 'HCHO': 'GEMS_HCHO',
+                    'SO2': 'GEMS_SO2', 'AERAOD': 'GEMS_AERAOD', 'UVI': 'GEMS_UVI'}
+    PRODUCTS: dict[str, ProductConfig] = {k: PRODUCT_CONFIGS[v] for k, v in PRODUCT_KEYS.items()}
 
     # GEMS 像素 ~3.5 km (南北) x 8 km (東西)：GridFrame 解析度為 (x_km=經度, y_km=緯度)
     DEFAULT_RESOLUTION = (8.0, 3.5)

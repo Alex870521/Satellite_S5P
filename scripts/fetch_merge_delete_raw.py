@@ -14,6 +14,8 @@
   python -m scripts.fetch_merge_delete_raw --product SO2___ --year 2023 --keep-raw  # 下載+merge 但不刪
 """
 from __future__ import annotations
+
+import os
 import argparse
 import shutil
 from datetime import datetime
@@ -26,7 +28,8 @@ from src.api import SENTINEL5PHub
 from src.merge import merge_product
 
 BOUNDARY = (119, 123, 21, 26)
-LOCAL_WORK = Path("/Users/chanchihyu/Satellite/Data")   # 本機放全年 gridded 工作檔
+# 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
+LOCAL_WORK = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "Satellite/Data"))
 
 
 def _raw_dir(product: str) -> Path:

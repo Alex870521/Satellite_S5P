@@ -7,10 +7,12 @@ ERA5 的「raw」本身就是全年檔（區域裁切、小），模型直接讀
 - r2m（2m 相對濕度）：由 d2m_t2m 用 Magnus 公式推導（與 2024 同法）。
 下載落地 DataCenter（模型讀的位置），再移進 single_level/<year>/ 子目錄。
 
-用法：SATELLITE_BASE_DIR=/Users/chanchihyu/DataCenter/Satellite \
+用法：SATELLITE_BASE_DIR=/path/to/data \
         python -m scripts.download_era5 --year 2021
 """
 from __future__ import annotations
+
+import os
 import argparse
 import calendar
 import shutil

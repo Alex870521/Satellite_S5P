@@ -16,12 +16,24 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-MCD19A2_GLOB = "/Volumes/Transcend/MODIS/raw/MCD19A2/*/*/*.hdf"
+# 相對於 DATA_ROOTS 找,不寫死掛載點(碟名因人而異,資料也可能散在多顆碟)
+from src.config.settings import DATA_ROOTS
+
+MCD19A2_REL = "MODIS/raw/MCD19A2/*/*/*.hdf"
+
+
+def _glob_roots(rel_pattern):
+    """在每個資料根目錄底下找;回傳第一個有命中的結果(排除 macOS 的 ._ 殘檔)。"""
+    for root in DATA_ROOTS:
+        hits = [f for f in sorted(glob.glob(str(root / rel_pattern))) if "/._" not in f]
+        if hits:
+            return hits
+    return []
 TAIWAN_TILES = ("h28v06", "h29v06")     # 覆蓋台灣需要的兩塊 sinusoidal tile
 
 
 def _samples(n=6):
-    fs = [f for f in sorted(glob.glob(MCD19A2_GLOB)) if "/._" not in f]
+    fs = _glob_roots(MCD19A2_REL)
     if not fs:
         pytest.skip("找不到 MCD19A2 原始檔(外接碟未掛載?)")
     return fs[:n]
@@ -103,7 +115,7 @@ class TestMCD19A2RawStructure:
 
     def test_taiwan_needs_two_tiles(self):
         """台灣跨兩塊 tile;少一塊就會缺半邊。"""
-        fs = [f for f in sorted(glob.glob(MCD19A2_GLOB)) if "/._" not in f]
+        fs = _glob_roots(MCD19A2_REL)
         if not fs:
             pytest.skip("找不到 MCD19A2 原始檔")
         found = {t for t in TAIWAN_TILES if any(t in Path(f).name for f in fs)}
@@ -114,7 +126,7 @@ class TestMCD19A2RawStructure:
         from src.processing.l3 import (GridSpec, L3Pipeline, L3Writer,
                                        SupersampleBinRegridder)
         from src.processing.l3.adapters import MODISAdapter
-        fs = [f for f in sorted(glob.glob(MCD19A2_GLOB)) if "/._" not in f][:6]
+        fs = _glob_roots(MCD19A2_REL)[:6]
         if len(fs) < 2:
             pytest.skip("樣本不足")
         # 檔名 .AYYYYDDD. → 同日的檔案

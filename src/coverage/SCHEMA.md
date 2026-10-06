@@ -2,7 +2,7 @@
 
 各 hub 的檔案結構紀錄,供日後更新 reader / processor 或新增 hub 時對照。
 分兩層:**raw（下載的原始檔，未裁切/未網格化）** 與 **processed（`process_data` 寫出、本工具實際讀的檔）**。
-驗證時間 2026-06,對照磁碟 `/Volumes/Transcend`(= `BASE_DIR`)。
+驗證時間 2026-06,對照 `BASE_DIR`(由 `SATELLITE_BASE_DIR` 指定)下的實際檔案。
 
 > 本工具(`src/coverage`)只讀 **processed**。raw 欄位列出來是為了知道 processor 從哪來、未來改格網時怎麼動。
 
@@ -58,8 +58,9 @@
 - 維度:`(time=1, latitude, longitude)`、1D 座標、無 group(攤平)。`time` 由檔名解析(如 0345 UTC)。
 - AERAOD 特例:輸出 `FinalAerosolOpticalDepth_{354|443|550}nm` 多變數 → reader 用「第一個 data_var」回退(`registry._GEMS_VARS['AERAOD']=None`)。
 - 實測檔:`(time=1, latitude=159, longitude=51)`、var `ColumnAmountNO2`、time 含**時刻**(靜止軌一天多筆,如 00:45 UTC)。
-- **資料位置(不在預設 Transcend)**:逐檔版 `/Users/chanchihyu/DataCenter/Satellite/GEMS/processed/<PRODUCT>/<YYYY>/<MM>/`;另有整年合併檔 `/Volumes/TOSHIBA/GEMS/processed/GEMS_NO2_merged_20220101_20231231.nc`(flat)。
-- **狀態**:reader **已驗證可用**,用 `--base-dir /Users/chanchihyu/DataCenter/Satellite`(或 TOSHIBA)指向即可。⚠️ 多時刻需注意 end 日期會自動補到當日 23:59:59。
+- **資料位置**:逐檔版在某些機器上不在 `BASE_DIR` 底下,用 `--base-dir` 指過去即可;
+  另有整年合併檔 `<BASE_DIR>/GEMS/processed/GEMS_NO2_merged_<起>_<迄>.nc`(flat,沒有年月分層)。
+- **狀態**:reader **已驗證可用**,用 `--base-dir <放 GEMS 的根目錄>` 指過去即可。⚠️ 多時刻需注意 end 日期會自動補到當日 23:59:59。
 
 ---
 

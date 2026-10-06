@@ -47,6 +47,9 @@ Before using this toolkit, you need to complete the following steps:
 1. **Copernicus Account** (for Sentinel-5P and ERA5):
    - Register for a free account at [Copernicus Open Access Hub](https://scihub.copernicus.eu/dhus/#/home)
    - For ERA5, also register at [Climate Data Store](https://cds.climate.copernicus.eu/)
+   - **For bulk downloads, also generate S3 keys** at
+     [eodata-s3keysmanager](https://eodata-s3keysmanager.dataspace.copernicus.eu)
+     (same login, takes a minute) — see the note below on why
 
 2. **NASA Earthdata Account** (for MODIS):
    - Register at [NASA Earthdata](https://urs.earthdata.nasa.gov/)
@@ -60,6 +63,10 @@ Before using this toolkit, you need to complete the following steps:
      # Sentinel-5P credentials
      COPERNICUS_USERNAME=your_username
      COPERNICUS_PASSWORD=your_password
+
+     # Sentinel-5P bulk downloads via S3 (optional, much faster — see below)
+     S3_ACCESS_KEY=your_access_key
+     S3_SECRET_KEY=your_secret_key
      
      # ERA5 credentials
      CDSAPI_URL=https://cds.climate.copernicus.eu/api
@@ -72,17 +79,37 @@ Before using this toolkit, you need to complete the following steps:
      # GEMS credentials (request a key at https://nesc.nier.go.kr)
      GEMS_API_KEY=your_key
 
-     # Where downloads/outputs are stored. REQUIRED unless the default
-     # external drive (/Volumes/Transcend) is mounted — otherwise creating a
-     # hub (e.g. SENTINEL5PHub()) fails immediately while making its data dirs.
+     # Where downloads/outputs are stored. Defaults to ./data inside the repo,
+     # which is fine for a smoke test but not for real work — these archives
+     # run to terabytes, so point this at an external drive.
      SATELLITE_BASE_DIR=/path/to/your/data
      ```
 
+> [!TIP]
+> **Downloading more than a few tens of GB? Use S3.** The default OData/zipper
+> endpoint allows **4 concurrent connections**; exceeding that returns HTTP 429
+> and the retry backoff makes throughput collapse (we measured 85 MB/s for the
+> first minute, then 2 MB/s for the next hour). The S3 endpoint has a separate
+> quota and is several times faster per connection.
+>
+> | route | 1 connection | practical |
+> |---|---|---|
+> | OData / zipper | 3.4 MB/s | 4 conns ≈ 15 MB/s, more ⇒ 429 |
+> | **S3 `eodata`** | **9.3 MB/s** | 8 conns ≈ 36 MB/s |
+>
+> *(measured 2026-09-22 from Taiwan; your numbers will differ, but the ratio
+> and the 429 behaviour should not.)* Both can run **at the same time**.
+> Get keys at [eodata-s3keysmanager.dataspace.copernicus.eu](https://eodata-s3keysmanager.dataspace.copernicus.eu),
+> endpoint `https://eodata.dataspace.copernicus.eu`, bucket `eodata`; an object's
+> key is the product's OData `S3Path` with the leading `/eodata/` stripped.
+
 > [!IMPORTANT]
 > **`SATELLITE_BASE_DIR` controls where data is written.** It defaults to
-> `/Volumes/Transcend`; if that drive is not mounted, every hub constructor
-> raises a `PermissionError`/`FileNotFoundError` before it can do anything.
-> Set it to a local path (e.g. `./data`) on any machine without that drive.
+> `./data` inside the repo. Set it to wherever you keep the archive — these
+> products run to terabytes, so that is normally an external drive.
+> (Before 2026-09 the default was a hard-coded mount point, so every hub
+> constructor raised `PermissionError`/`FileNotFoundError` on any machine
+> that did not happen to have that drive attached.)
 >
 > **NASA Earthdata `Token does not exist`:** if MODIS search/download fails
 > with `{"errors":["Token does not exist"]}`, a stale bearer token on the
@@ -144,6 +171,8 @@ from src.api import SENTINEL5PHub
 # file_class: 'NRTI' (Near Real-Time) or 'OFFL' (Offline processed)
 # file_type:  'NO2___', 'O3____', 'CO____', 'SO2___', 'CH4___', 'AER_AI'
 #             ('CLOUD_' / 'FRESCO' / 'AER_LH' can be downloaded but have no processing config yet)
+# variable:   optional; AER_AI has two bands — 'aerosol_index_340_380' (default, matches existing
+#             processed files) or 'aerosol_index_354_388'. e.g. SentinelProcessor(file_type='AER_AI', variable=...)
 sentinel_hub = SENTINEL5PHub(max_workers=3)
 sentinel_hub.run_pipeline(
     file_class='NRTI',
@@ -313,7 +342,7 @@ All data sources follow a consistent workflow:
 ## <div align="center">Storage Layout</div>
 
 All downloads and outputs live under a single **base directory**, configured once via the
-`SATELLITE_BASE_DIR` environment variable in `.env` (falls back to `/Volumes/Transcend` if unset).
+`SATELLITE_BASE_DIR` environment variable in `.env` (falls back to `./data` if unset).
 Every satellite hub then builds the same `{base}/{Satellite}/{raw|processed|figure}/...` tree.
 
 Anatomy of a downloaded file path (GEMS NO₂ example):
@@ -346,6 +375,12 @@ $SATELLITE_BASE_DIR/
 ```
 
 > **To relocate all data**, change only `SATELLITE_BASE_DIR` in `.env` — no code changes needed.
+
+> **Data on more than one drive?** Set `SATELLITE_DATA_ROOTS` (os.pathsep-separated, e.g.
+> `/Volumes/Archive:/Volumes/Work`). Tools that look for the same product across drives —
+> `scripts/l3_regrid_year.py` and the data-backed tests — search every root; unset means just
+> `SATELLITE_BASE_DIR`. Gridded year files go to `LOCAL_WORK_DIR` (default `~/Satellite/Data`).
+> No path in the code names a specific drive, so swapping drives is an `.env` edit only.
 
 ## <div align="center">Automatic Data Management</div>
 
