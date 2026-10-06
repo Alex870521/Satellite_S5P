@@ -5,7 +5,7 @@ aggregation -> tidy DataFrame.
 
 A *day* is the atomic unit: several orbits/granules can observe the same day,
 so a cell counts as covered if **any** slice that day carries valid data there
-(union) — matching the wip_coverage "combined" merge. Coarser granularities
+(union). Coarser granularities
 (monthly/yearly) average the daily coverages. ``per_file`` skips the union and
 reports every raw slice (diagnostic).
 """

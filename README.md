@@ -11,385 +11,116 @@
 
 ---
 
-A comprehensive Python toolkit for retrieving, processing, and visualizing satellite data from multiple sources: Sentinel-5P, MODIS, ERA5, and GEMS. This toolkit focuses on atmospheric data including air pollutants (NO₂, CO, SO₂, O₃, HCHO), aerosol optical depth, and meteorological parameters.
+Download, grid and plot atmospheric satellite data — **Sentinel-5P**, **MODIS**, **GEMS** and **ERA5** —
+through one API per source, and regrid all of them onto one common 0.02° grid.
 
-## <div align="center">Features</div>
-
-- **Multi-platform Support**:
-  - **Sentinel-5P**: Trace gases and air pollutants
-  - **MODIS**: Aerosol optical depth (AOD) measurements
-  - **ERA5**: Reanalysis of atmospheric, land, and oceanic climate variables
-  - **GEMS**: Geostationary hourly trace gases & aerosol over East Asia (daytime)
-
-- **Unified Data Access**:
-  - Automated data retrieval from Copernicus Open Access Hub, NASA Earthdata, Climate Data Store, and the NIER/NESC GEMS Open-API
-  - Consistent API across different data sources
-
-- **Advanced Processing**:
-  - Quality control and filtering
-  - Spatial interpolation and regridding
-  - Temporal aggregation
-  - Station-based data extraction
-
-- **Visualization**:
-  - High-quality concentration and parameter maps
-  - Customizable geographic boundaries
-  - Time series analysis capabilities
-
-- **Resource Management**:
-  - Efficient download handling with caching
-  - Built-in file retention management
-
-## <div align="center">Prerequisites</div>
-
-Before using this toolkit, you need to complete the following steps:
-
-1. **Copernicus Account** (for Sentinel-5P and ERA5):
-   - Register for a free account at [Copernicus Open Access Hub](https://scihub.copernicus.eu/dhus/#/home)
-   - For ERA5, also register at [Climate Data Store](https://cds.climate.copernicus.eu/)
-   - **For bulk downloads, also generate S3 keys** at
-     [eodata-s3keysmanager](https://eodata-s3keysmanager.dataspace.copernicus.eu)
-     (same login, takes a minute) — see the note below on why
-
-2. **NASA Earthdata Account** (for MODIS):
-   - Register at [NASA Earthdata](https://urs.earthdata.nasa.gov/)
-
-3. **GEMS Open-API Key** (for GEMS):
-   - Request a key at [NIER/NESC](https://nesc.nier.go.kr) and use the "single key" mode
-
-4. **Environment Configuration**:
-   - Create a `.env` file in the project root directory with your credentials:
-     ```
-     # Sentinel-5P credentials
-     COPERNICUS_USERNAME=your_username
-     COPERNICUS_PASSWORD=your_password
-
-     # Sentinel-5P bulk downloads via S3 (optional, much faster — see below)
-     S3_ACCESS_KEY=your_access_key
-     S3_SECRET_KEY=your_secret_key
-     
-     # ERA5 credentials
-     CDSAPI_URL=https://cds.climate.copernicus.eu/api
-     CDSAPI_KEY=your_key
-     
-     # NASA Earthdata credentials
-     EARTHDATA_USERNAME=your_username
-     EARTHDATA_PASSWORD=your_password
-
-     # GEMS credentials (request a key at https://nesc.nier.go.kr)
-     GEMS_API_KEY=your_key
-
-     # Where downloads/outputs are stored. Defaults to ./data inside the repo,
-     # which is fine for a smoke test but not for real work — these archives
-     # run to terabytes, so point this at an external drive.
-     SATELLITE_BASE_DIR=/path/to/your/data
-     ```
-
-> [!TIP]
-> **Downloading more than a few tens of GB? Use S3.** The default OData/zipper
-> endpoint allows **4 concurrent connections**; exceeding that returns HTTP 429
-> and the retry backoff makes throughput collapse (we measured 85 MB/s for the
-> first minute, then 2 MB/s for the next hour). The S3 endpoint has a separate
-> quota and is several times faster per connection.
->
-> | route | 1 connection | practical |
-> |---|---|---|
-> | OData / zipper | 3.4 MB/s | 4 conns ≈ 15 MB/s, more ⇒ 429 |
-> | **S3 `eodata`** | **9.3 MB/s** | 8 conns ≈ 36 MB/s |
->
-> *(measured 2026-09-22 from Taiwan; your numbers will differ, but the ratio
-> and the 429 behaviour should not.)* Both can run **at the same time**.
-> Get keys at [eodata-s3keysmanager.dataspace.copernicus.eu](https://eodata-s3keysmanager.dataspace.copernicus.eu),
-> endpoint `https://eodata.dataspace.copernicus.eu`, bucket `eodata`; an object's
-> key is the product's OData `S3Path` with the leading `/eodata/` stripped.
-
-> [!IMPORTANT]
-> **`SATELLITE_BASE_DIR` controls where data is written.** It defaults to
-> `./data` inside the repo. Set it to wherever you keep the archive — these
-> products run to terabytes, so that is normally an external drive.
-> (Before 2026-09 the default was a hard-coded mount point, so every hub
-> constructor raised `PermissionError`/`FileNotFoundError` on any machine
-> that did not happen to have that drive attached.)
->
-> **NASA Earthdata `Token does not exist`:** if MODIS search/download fails
-> with `{"errors":["Token does not exist"]}`, a stale bearer token on the
-> `cmr.earthdata.nasa.gov` line of your `~/.netrc` is being sent by
-> `python-cmr`. Remove that line (or regenerate the token at
-> [urs.earthdata.nasa.gov](https://urs.earthdata.nasa.gov/)).
-
-## <div align="center">Installation</div>
+## Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/Alex870521/Satellite_S5P.git
 cd Satellite_S5P
-
-# Core install — downstream analysis & visualization (reads NetCDF only)
-pip install .
-
-# ...or add the HDF4 ingest extra, only if you need to convert raw MODIS .hdf files
-pip install ".[ingest]"
-```
-
-> [!IMPORTANT]
-> **Reading raw MODIS HDF4 (`.hdf`) requires `pyhdf`**, which ships only in the
-> optional `[ingest]` extra. The core package and all downstream processing read
-> **NetCDF only** and do not need `pyhdf` — raw `.hdf` is converted to `.nc` once
-> at ingest, and everything else (plots, FNR, analysis) reads the NetCDF output.
->
-> | What you do | Recommended Python | Needs `pyhdf`? |
-> |---|---|---|
-> | Downstream analysis (read `.nc`, plots, FNR) | 3.12 / 3.13 / **3.14** | No — `pip install .` |
-> | Convert raw `.hdf` → `.nc` (ingest) | **3.12 / 3.13** | Yes — `pip install ".[ingest]"` |
->
-> ⚠️ **Python 3.14 + HDF4 ingest is not supported yet.** `pyhdf` has no 3.14 wheel
-> on any platform (including Windows `win_amd64`), so `pip install ".[ingest]"`
-> falls back to a source build and fails (missing HDF4 headers). Run the ingest /
-> conversion step under Python 3.12 or 3.13; keep 3.14 for analysis only.
->
-> 🪟 **Windows users:** `pyhdf` provides wheels for Python 3.7–3.13 (`win_amd64`),
-> so `pip install ".[ingest]"` works out of the box on 3.12/3.13 — no conda or
-> manual HDF4 setup needed. On **Windows + Python 3.14**, run ingest under
-> 3.12/3.13 (or `conda install -c conda-forge pyhdf`); use 3.14 for analysis only.
-
-For a pinned development environment you can still use `pip install -r requirements.txt`
-(note: `pyhdf` there is ingest-only — see the comment in the file).
-
-## <div align="center">Usage</div>
-
-Every hub exposes a single one-call **`run_pipeline()`** that runs *fetch → download → process*.
-The three steps (`fetch_data` / `download_data` / `process_data`) remain available when you need to
-inspect or control each stage. Query parameters differ per source (forwarded to `fetch_data`).
-
-### Sentinel-5P Example
-
-```python
-"""SENTINEL-5P Data Processing Example"""
-from datetime import datetime
-from src.api import SENTINEL5PHub
-
-# file_class: 'NRTI' (Near Real-Time) or 'OFFL' (Offline processed)
-# file_type:  'NO2___', 'O3____', 'CO____', 'SO2___', 'CH4___', 'AER_AI'
-#             ('CLOUD_' / 'FRESCO' / 'AER_LH' can be downloaded but have no processing config yet)
-# variable:   optional; AER_AI has two bands — 'aerosol_index_340_380' (default, matches existing
-#             processed files) or 'aerosol_index_354_388'. e.g. SentinelProcessor(file_type='AER_AI', variable=...)
-sentinel_hub = SENTINEL5PHub(max_workers=3)
-sentinel_hub.run_pipeline(
-    file_class='NRTI',
-    file_type='NO2___',
-    start_date=datetime(2025, 3, 1),
-    end_date=datetime(2025, 3, 13),
-    boundary=(120, 122, 22, 25),   # (min_lon, max_lon, min_lat, max_lat)
-)
-```
-
-### MODIS Example
-
-```python
-"""MODIS Data Processing Example"""
-from datetime import datetime
-from src.api import MODISHub
-
-# Product types: 'MOD04_L2' (Terra) / 'MYD04_L2' (Aqua) / 'MCD19A2' (MAIAC)
-modis_hub = MODISHub()
-modis_hub.run_pipeline(
-    file_type='MYD04_L2',
-    start_date=datetime(2025, 3, 1),
-    end_date=datetime(2025, 3, 12),
-)
-```
-
-### ERA5 Example
-
-```python
-"""ERA5 Data Processing Example"""
-from datetime import datetime
-from src.api import ERA5Hub
-
-# Observation stations extracted to CSV (ERA5 outputs CSV, not maps)
-STATIONS = [
-    {"name": "FS", "lat": 22.6294, "lon": 120.3461},  # Kaohsiung Fengshan
-    {"name": "NZ", "lat": 22.7422, "lon": 120.3339},  # Kaohsiung Nanzi
-    {"name": "TH", "lat": 24.1817, "lon": 120.5956},  # Taichung
-    {"name": "TP", "lat": 25.0330, "lon": 121.5654},  # Taipei
-]
-
-era5_hub = ERA5Hub(timezone='Asia/Taipei')
-era5_hub.run_pipeline(
-    start_date=datetime(2025, 3, 1),
-    end_date=datetime(2025, 3, 19),
-    boundary=(119, 123, 21, 26),         # (min_lon, max_lon, min_lat, max_lat)
-    variables=['boundary_layer_height'],
-    pressure_levels=None,                # None = surface data only
-    download_mode='all_at_once',         # or 'monthly'
-    stations=STATIONS,                   # required, else nothing is written to CSV
-)
+pip install .               # analysis and plotting (reads NetCDF)
+pip install ".[ingest]"     # + pyhdf, only to read raw MODIS .hdf
 ```
 
 > [!NOTE]
-> Unlike Sentinel-5P / MODIS / GEMS, the ERA5 pipeline does **not** render maps —
-> it extracts each station's time series to CSV (pass `stations=...`).
+> `pyhdf` has no Python 3.14 wheel yet: run MODIS `.hdf` ingest under 3.12/3.13 and use 3.14 for analysis only.
 
-### GEMS Example
+## Configuration
+
+Create `.env` in the repo root:
+
+```ini
+COPERNICUS_USERNAME=...      # Sentinel-5P
+COPERNICUS_PASSWORD=...
+S3_ACCESS_KEY=...            # optional, much faster bulk S5P downloads
+S3_SECRET_KEY=...
+CDSAPI_URL=https://cds.climate.copernicus.eu/api   # ERA5
+CDSAPI_KEY=...
+EARTHDATA_USERNAME=...       # MODIS
+EARTHDATA_PASSWORD=...
+GEMS_API_KEY=...             # GEMS (nesc.nier.go.kr)
+
+SATELLITE_BASE_DIR=/path/to/archive   # where all downloads and outputs go
+```
+
+> [!IMPORTANT]
+> `SATELLITE_BASE_DIR` defaults to `./data` inside the repo. The archives reach terabytes,
+> so point it at an external drive before the first real download.
+
+> [!TIP]
+> Downloading more than a few tens of GB of Sentinel-5P? Add the S3 keys — the default endpoint
+> caps you at 4 connections and throttles (HTTP 429); S3 is several times faster.
+
+Account sign-up, the S3 speed comparison and per-product resolutions: [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md).
+Where every file lands, and the other path variables: [docs/STORAGE.md](docs/STORAGE.md).
+
+## Usage
+
+Each hub has a one-call `run_pipeline()` (fetch → download → process); `fetch_data` /
+`download_data` / `process_data` remain available step by step.
 
 ```python
-"""GEMS Data Processing Example"""
-from src.api import GEMSHub
+from datetime import datetime
+from src.api import SENTINEL5PHub, MODISHub, ERA5Hub, GEMSHub
 
-# Product types: 'NO2', 'O3'/'O3T', 'O3P', 'SO2', 'HCHO', 'CHOCHO',
-#                'AOD'/'AERAOD', 'AEH', 'UVI', 'CLOUD'
-gems_hub = GEMSHub()   # requires GEMS_API_KEY in .env
-gems_hub.run_pipeline(
-    product_type='NO2',
-    start_date='2023-05-15',
-    end_date='2023-05-15',
-    ver=None,                            # None = resolve the latest version online (NO2 v4.0.1)
-    extract_bbox=(119, 123, 21, 26),     # server-side Taiwan crop: ~270 MB -> ~2-3 MB / granule
-    max_workers=3,                       # concurrent downloads
-    skip_existing=True,                  # resumable backfill
-)
+SENTINEL5PHub(max_workers=3).run_pipeline(
+    file_class='OFFL', file_type='NO2___',
+    start_date=datetime(2025, 3, 1), end_date=datetime(2025, 3, 13),
+    boundary=(120, 122, 22, 25))                     # (min_lon, max_lon, min_lat, max_lat)
+
+MODISHub().run_pipeline(file_type='MCD19A2',
+                        start_date=datetime(2025, 3, 1), end_date=datetime(2025, 3, 12))
+
+GEMSHub().run_pipeline(product_type='NO2', start_date='2023-05-15', end_date='2023-05-15',
+                       extract_bbox=(119, 123, 21, 26))
+
+ERA5Hub(timezone='Asia/Taipei').run_pipeline(
+    start_date=datetime(2025, 3, 1), end_date=datetime(2025, 3, 19),
+    boundary=(119, 123, 21, 26), variables=['boundary_layer_height'],
+    stations=[{"name": "TP", "lat": 25.033, "lon": 121.565}])
+```
+
+> [!NOTE]
+> ERA5 writes each station's time series to CSV and does not render maps — pass `stations=`.
+
+> [!TIP]
+> GEMS `extract_bbox` crops on the server (~270 MB → 2–3 MB per granule), and the pipeline streams
+> download → grid → delete raw, so a long backfill needs only a few MB of disk.
+
+### Unified L3 (0.02° year files)
+
+Footprint-supersampled binning puts every source on the same 251 × 201 grid over Taiwan:
+
+```bash
+python -m scripts.l3_regrid_year --source s5p   --product NO2___        --year 2024
+python -m scripts.l3_regrid_year --source s5p   --product NO2___        --year 2023 --freq granule  # one step per orbit
+python -m scripts.l3_regrid_year --source gems  --product GEMS_NO2_TROP --year 2024  # one file per time slot
+python -m scripts.l3_regrid_year --source modis --product MCD19A2       --year 2025  # 550 nm + AOD_QA
 ```
 
 > [!TIP]
-> GEMS `run_pipeline` streams *download → grid → delete-raw* per granule, so peak disk stays at
-> a few MB with `extract_bbox`. Pass `keep_raw=True` to retain raw swaths, or `make_figures=False`
-> to skip plotting during large backfills.
+> Add `--dry-run` to see how many raw files were found and where the output will go before a long run.
 
-## <div align="center">Data Sources</div>
+> [!WARNING]
+> GEMS `ColumnAmountNO2` (`GEMS_NO2`) is the **total** column — mostly stratospheric over Taiwan.
+> Use `GEMS_NO2_TROP` when comparing with TROPOMI or estimating surface sources.
 
-### Sentinel-5P
-- **Provider**: European Space Agency (ESA) — Copernicus / TROPOMI
-- **Frequency**: daily global coverage; processing classes `NRTI` / `OFFL` / `RPRO`
-- **Auth**: `COPERNICUS_USERNAME` / `COPERNICUS_PASSWORD` (Copernicus Data Space)
+Method, QC defaults, validation against HARP and output format: [src/processing/l3/README.md](src/processing/l3/README.md).
 
-| Product | `file_type` | Resolution (km) | Quantity |
-|---------|-------------|-----------------|----------|
-| NO₂ | `NO2___` | 5.5 × 3.5 | Tropospheric column |
-| O₃ | `O3____` | 5.5 × 3.5 | Total vertical column |
-| O₃ profile | `O3__PR` | 30 × 30 | Vertical profile |
-| SO₂ | `SO2___` | 5.5 × 3.5 | Total vertical column |
-| HCHO | `HCHO__` | 5.5 × 3.5 | Tropospheric vertical column |
-| CO | `CO____` | 5.5 × 7 | Total column |
-| CH₄ | `CH4___` | 5.5 × 7 | Column-averaged mixing ratio |
-| Aerosol Index | `AER_AI` | 5.5 × 3.5 | UV aerosol index |
-| Cloud | `CLOUD_` | 5.5 × 3.5 | Cloud fraction / properties — **download only, processing not yet configured** |
+## Documentation
 
-> Nadir resolution is 5.5 × 3.5 km since 2019-08-06 (7 × 3.5 km before).
+| Topic | Guide |
+|---|---|
+| Products, accounts, S3 downloads | [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) |
+| Paths and directory layout | [docs/STORAGE.md](docs/STORAGE.md) |
+| Unified L3 regrid pipeline | [src/processing/l3/README.md](src/processing/l3/README.md) |
+| Coverage statistics | [src/coverage/README.md](src/coverage/README.md) |
+| Merging per-granule files into series | [src/merge/README.md](src/merge/README.md) |
+| GEMS API | [docs/GEMS_API_README.md](docs/GEMS_API_README.md) |
+| MODIS AOD variables / HDF merge | [docs/MODIS_AOD_Variables_README.md](docs/MODIS_AOD_Variables_README.md), [docs/MODIS_HDF_Merge_README.md](docs/MODIS_HDF_Merge_README.md) |
+| Himawari API *(mock, not wired to a real service)* | [docs/Himawari_API_README.md](docs/Himawari_API_README.md) |
 
-### MODIS
-- **Provider**: NASA — Terra & Aqua (Dark Target) / combined (MAIAC)
-- **Frequency**: 1–2 days global coverage
-- **Auth**: `EARTHDATA_USERNAME` / `EARTHDATA_PASSWORD` (NASA Earthdata)
+## Contact
 
-| Product | Platform | Algorithm (level) | Resolution |
-|---------|----------|-------------------|------------|
-| `MOD04_L2` / `MYD04_L2` | Terra / Aqua | Dark Target AOD (L2) | 10 km |
-| `MOD04_3K` / `MYD04_3K` | Terra / Aqua | Dark Target AOD (L2) | 3 km |
-| `MCD19A2` | Terra + Aqua | MAIAC AOD (L3) | 1 km |
-
-### ERA5
-- **Provider**: European Centre for Medium-Range Weather Forecasts (ECMWF)
-- **Frequency**: hourly, monthly updates; 0.25° × 0.25° global grid (~31 km)
-- **Auth**: `CDSAPI_URL` / `CDSAPI_KEY` (Climate Data Store)
-
-| Type | Examples | Levels |
-|------|----------|--------|
-| Single-level (surface) | boundary_layer_height, 2 m temperature, 10 m wind, mean sea-level pressure | surface |
-| Pressure-level | temperature, u/v wind, geopotential, relative humidity | 37 levels (1000–1 hPa) |
-
-> This toolkit extracts per-station time series to CSV (no maps); 100+ variables are available.
-
-### GEMS
-- **Provider**: NIER Environmental Satellite Center (NESC), Korea — GK-2B geostationary
-- **Frequency**: hourly, **daytime only**, over East/South-East Asia (up to ~10 scans/day)
-- **Auth**: set `GEMS_API_KEY` in `.env` (request a key at [nesc.nier.go.kr](https://nesc.nier.go.kr))
-
-| Level | Products | Spatial resolution | Coverage (UTC) |
-|-------|----------|--------------------|----------------|
-| **L2** (swath) | NO₂, O₃ (O3T), SO₂, HCHO, CHOCHO, Aerosol (AOD/AEH), UVI, Cloud | **3.5 km × 8 km** (N–S × E–W) at Seoul; ≈ 2.8 × 7.1 km measured over Taiwan. CHOCHO is co-added (coarser) | trace gases since **~2020-09**, ongoing |
-| **L3** (gridded) | NO₂ daily / monthly mean — column & tropospheric (whole domain / KR / EA) | **~5 km over Korea, ~10 km elsewhere** | since **~2020-09**, ongoing |
-| **L4** (surface) | Surface PM₂.₅, PM₁₀, NO₂ | gridded surface product | since **~2021-12**, ongoing |
-
-> Native L2 pixel size grows toward the scan edges. This toolkit re-grids L2 swaths onto a regular
-> grid (default **8 km × 3.5 km**, set per-product in `GEMSProcessor`) before plotting/export.
-
-## <div align="center">Documentation</div>
-
-Per-source and topic guides live under [`docs/`](docs/):
-
-- [GEMS API](docs/GEMS_API_README.md) — products, usage, storage layout, `GEMS_API_KEY` setup
-- [Himawari API](docs/Himawari_API_README.md) — products & usage *(mock; not yet wired to a real service)*
-- [MODIS AOD variables](docs/MODIS_AOD_Variables_README.md) — AOD variable reference
-- [MODIS HDF → NetCDF merge](docs/MODIS_HDF_Merge_README.md) — raw `.hdf` ingest/merge notes
-- [Unified L3 regrid pipeline](src/processing/l3/README.md) — footprint supersampling to one 0.02° grid for all sources (`process_l3()` / `scripts/l3_regrid_year.py`)
-- [Coverage toolkit](src/coverage/README.md) — region × time coverage statistics across satellites
-- [Merge](src/merge/README.md) — stack hourly processed files into `(time, lat, lon)` series
-
-## <div align="center">Processing Pipeline</div>
-
-All data sources follow a consistent workflow:
-
-1. **Data Discovery**: Query available products based on date range and region
-2. **Download Management**: Efficient parallel downloading with error handling
-3. **Quality Control**: Filtering based on data quality flags
-4. **Spatial Processing**: 
-   - Sentinel-5P: RBF interpolation of sparse satellite data
-   - MODIS: Processing of gridded AOD values
-   - ERA5: Extraction of point values for weather stations
-5. **Visualization**: Generation of standardized maps and plots
-6. **Export**: Structured data storage in NetCDF and CSV formats
-
-## <div align="center">Storage Layout</div>
-
-All downloads and outputs live under a single **base directory**, configured once via the
-`SATELLITE_BASE_DIR` environment variable in `.env` (falls back to `./data` if unset).
-Every satellite hub then builds the same `{base}/{Satellite}/{raw|processed|figure}/...` tree.
-
-Anatomy of a downloaded file path (GEMS NO₂ example):
-
-```
-$SATELLITE_BASE_DIR / GEMS / raw /  NO2  / 2023/05 / GK2_GEMS_L2_..._NO2_..._.nc
-└───── ① base ─────┘  └─②─┘ └─③─┘ └─④─┘ └──⑤──┘  └──────────── ⑥ ───────────┘
-```
-
-| # | Segment | Value (example) | Where it is set |
-|---|---------|-----------------|-----------------|
-| ① | **base dir** | `…/DataCenter/Satellite` | `.env` → `SATELLITE_BASE_DIR` (read by `src/config/settings.py` → `BASE_DIR`) |
-| ② | **satellite** | `GEMS` | each hub's `name` attribute → `core.py` `main_dir = base_dir / name` |
-| ③ | **stage** | `raw` (also `processed`, `figure`, `logs`) | `core.py` `_setup_common_dirs()` |
-| ④ | **product** | `NO2` | hub download step (e.g. `gems_api.py`) |
-| ⑤ | **year/month** | `2023/05` | derived from each file's timestamp |
-| ⑥ | **filename** | original granule name | from the data provider |
-
-Resulting tree:
-
-```
-$SATELLITE_BASE_DIR/
-├── Sentinel-5P/ { raw, processed, figure }/L2/<product>/<YYYY>/<MM>/   (note the extra L2/ level; logs/ is flat)
-├── MODIS/       { raw, figure, logs }/<product>/<YYYY>/<MM>/   processed/<product>/ is flat (no year/month dirs)
-├── ERA5/        { raw, processed, figure, logs }/...
-└── GEMS/        { raw, processed, figure, logs }/<product>/<YYYY>/<MM>/
-    ├── raw/       NO2/2023/05/GK2_GEMS_L2_20230515_0345_NO2_..._.nc   ← downloaded swath
-    ├── processed/ NO2/2023/05/GK2_GEMS_L2_20230515_0345_NO2_..._.nc   ← gridded NetCDF
-    └── figure/    NO2/2023/05/GK2_GEMS_L2_20230515_0345_NO2_..._.png   ← map + monthly .gif
-```
-
-> **To relocate all data**, change only `SATELLITE_BASE_DIR` in `.env` — no code changes needed.
-
-> **Data on more than one drive?** Set `SATELLITE_DATA_ROOTS` (os.pathsep-separated, e.g.
-> `/Volumes/Archive:/Volumes/Work`). Tools that look for the same product across drives —
-> `scripts/l3_regrid_year.py` and the data-backed tests — search every root; unset means just
-> `SATELLITE_BASE_DIR`. Gridded year files go under `LOCAL_WORK_DIR` (default `~/DataCenter/Satellite/Data`): L3 in `l3/`, legacy RBF merges in `legacy_rbf/`, DEM in `static/`.
-> No path in the code names a specific drive, so swapping drives is an `.env` edit only.
-
-## <div align="center">Automatic Data Management</div>
-
-The toolkit includes built-in data retention management to prevent disk space issues:
-
-- Automatically cleans files older than the configured retention period
-- Maintains directory structure while removing outdated files
-- Can be scheduled for periodic execution or triggered manually
-
-## <div align="center">Contact</div>
-
-For bug reports and feature requests please visit [GitHub Issues](https://github.com/Alex870521/Satellite_DataKit/issues).
+Bug reports and feature requests: [GitHub Issues](https://github.com/Alex870521/Satellite_S5P/issues).

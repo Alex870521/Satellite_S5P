@@ -31,4 +31,4 @@ python -m src.merge --hub sentinel5p --product no2-tropospheric --level L3 \
     --aggregation day --start 2022-01-01 --end 2023-12-31
 ```
 預設輸出到該 hub 的 `processed/<Dir>_<product>_merged_<range>.nc`(L3 放 `processed/L3/<product>/`);
-`--out` 可覆寫,`--base-dir` 覆寫碟位(GEMS/L3 在 TOSHIBA、S5P-L2/MODIS 在 Transcend/DataCenter)。
+`--out` 可覆寫輸出檔,`--base-dir` 改讀其他資料根目錄(預設 `SATELLITE_BASE_DIR`)。

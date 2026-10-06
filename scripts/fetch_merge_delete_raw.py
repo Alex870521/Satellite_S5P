@@ -15,7 +15,6 @@
 """
 from __future__ import annotations
 
-import os
 import argparse
 import shutil
 from datetime import datetime
@@ -23,13 +22,13 @@ from pathlib import Path
 
 import xarray as xr
 
-from src.config.settings import BASE_DIR
+from src.config.settings import BASE_DIR, LOCAL_WORK_DIR
 from src.api import SENTINEL5PHub
 from src.merge import merge_product
 
 BOUNDARY = (119, 123, 21, 26)
 # 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
-LOCAL_WORK = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "DataCenter/Satellite/Data"))
+LOCAL_WORK = LOCAL_WORK_DIR
 
 
 def _raw_dir(product: str) -> Path:

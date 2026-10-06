@@ -34,7 +34,7 @@ python -m src.coverage --hub sentinel5p --product SO2___ --region central \
 
 ## 代表日地圖(representative days)
 
-依覆蓋率把每天分到 5 個區間(Low/Medium-Low/Medium/Good/Excellent),每區間挑**最接近中點**那天,畫出該天的 **processed 產品場**(同日多軌取聯集),疊區域邊界 + 海岸線。注意:畫的是覆蓋率產品本身,**不是**排放圖(wip 原版那種「通量散度排放 + raw L2 像素」靠 wip_emission 引擎,不在本工具)。
+依覆蓋率把每天分到 5 個區間(Low/Medium-Low/Medium/Good/Excellent),每區間挑**最接近中點**那天,畫出該天的 **processed 產品場**(同日多軌取聯集),疊區域邊界 + 海岸線。注意:畫的是覆蓋率產品本身,**不是**排放圖(通量散度排放不在本工具範圍)。
 
 ```python
 from src.coverage import compute_coverage, plot_representative_days
@@ -79,7 +79,7 @@ python -m src.coverage.qa_sweep --product NO2___ \
 - **region mask 快取**:同 hub+產品網格固定,point-in-polygon 只算一次。
 - ERA5(逐站 CSV)、Himawari(mock)為 stub。
 
-各 hub 原始/處理後檔結構見 [`SCHEMA.md`](SCHEMA.md)。前身原型在 `wip_coverage/`。
+各 hub 原始/處理後檔結構見 [`SCHEMA.md`](SCHEMA.md)。
 
 ## 逐格統計(對時間 reduction → 地圖)
 
@@ -87,8 +87,9 @@ python -m src.coverage.qa_sweep --product NO2___ \
 (區域內有效格/總格數)→ 時間序列;這裡是對**時間** reduction(每格有幾天有觀測)→ 地圖。
 
 ```python
+from src.config.settings import LOCAL_WORK_DIR
 from src.coverage import per_cell_stats, plot_cell_stats
-st = per_cell_stats("~/DataCenter/Satellite/Data/l3/MODIS_mcd19a2_aod_l3_02deg_2023.nc")
+st = per_cell_stats(LOCAL_WORK_DIR / "l3" / "MODIS_mcd19a2_aod_l3_02deg_2023.nc")
 # st = {"mean", "count", "coverage"(0-100%), "n_time", "var"}
 plot_cell_stats("...nc", product="MCD19A2", output="aod_cellstats.png")   # 三聯圖
 ```

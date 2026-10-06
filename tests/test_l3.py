@@ -7,7 +7,6 @@
 * **需要真實資料**(``requires_data`` 標記)—— 三個 source 的 adapter 讀真檔、
   以及跟 HARP oracle 對答案。碟沒掛/HARP 沒裝就 skip,不算失敗。
 
-取代原本散在 gitignore 的 `wip_l3/` 裡、且各自複製了一份 production 邏輯的驗證腳本。
 """
 from __future__ import annotations
 
@@ -221,8 +220,7 @@ class TestLevelRoundTrip:
     """把 regrid 結果寫成 L3 nc 後,必須被認成 L3 且能無損 ingest 回來。
 
     這是 L2/L3 自動分流最強的自驗:regrid → 寫檔 → 偵測 → 讀回,逐格必須一致。
-    (原本在 wip_l3/regression_l3_ingest.py,需要真實 granule;改用合成資料後
-    不需外接碟也能跑。)
+    用合成資料,不需外接碟也能跑。
     """
 
     def _write_l3(self, tmp_path):
@@ -385,7 +383,7 @@ class TestRealData:
         from src.processing.l3.harp_oracle import harp_available, harp_oracle
         from src.processing.l3.runner import make_adapter
         if not harp_available():
-            pytest.skip("HARP CLI 未安裝(micromamba create -p ~/mamba/envs/harp -c conda-forge harp)")
+            pytest.skip("HARP CLI 未安裝(conda-forge 的 harp;設 HARPCONVERT 或讓 harpconvert 在 PATH 上)")
         fs = _glob_roots(f"Sentinel-5P/raw/L2/{product}/{year}/{month}/*.nc")
         if not fs:
             pytest.skip(f"找不到 {product} {year}/{month} 的樣本檔")

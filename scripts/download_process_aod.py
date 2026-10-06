@@ -2,7 +2,7 @@
 """
 下載 MCD19A2 (MAIAC AOD) 並處理成全年 gridded nc（模型用）。
 
-MODIS hdf 很小（~5MB/檔、~4.6GB/年），下載到 Transcend MODIS raw，
+MODIS hdf 很小（~5MB/檔、~4.6GB/年），下載到 $SATELLITE_BASE_DIR/MODIS/raw，
 再用 merge_hdf_files_to_netcdf（cKDTree 修過、不卡死）產全年 0.01° 檔到本機。
 
 用法：
@@ -11,7 +11,6 @@ MODIS hdf 很小（~5MB/檔、~4.6GB/年），下載到 Transcend MODIS raw，
 """
 from __future__ import annotations
 
-import os
 import argparse
 import logging
 import shutil
@@ -22,12 +21,13 @@ import xarray as xr
 import numpy as np
 
 from src.api import MODISHub
+from src.config.settings import LOCAL_WORK_DIR
 from src.processing.modis_processor import MODISProcessor
 
 # earthaccess bounding_box 順序：(min_lon, min_lat, max_lon, max_lat)
 BOUNDARY = (119, 21, 123, 26)
 # 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
-LOCAL = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "DataCenter/Satellite/Data"))
+LOCAL = LOCAL_WORK_DIR
 
 
 def main():

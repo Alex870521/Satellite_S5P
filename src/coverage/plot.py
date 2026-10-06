@@ -2,10 +2,9 @@
 
 Consumes the tidy DataFrame returned by :func:`compute_coverage` (one row per
 time bucket, ``coverage`` in 0..1) and renders the **coverage-rate
-distribution** — the graduated form of
-``wip_coverage/plot_coverage_analysis.py``'s ``plot_coverage_distribution``.
+distribution**.
 
-The wip prototype hard-wired three panels (central / zhu-miao / combined) from
+An earlier prototype hard-wired three panels (central / zhu-miao / combined) from
 wide columns. Here the panels are driven generically by a column of the tidy
 table (``region`` by default), so the same function handles one region or a
 concatenation of several — e.g.::
@@ -32,7 +31,7 @@ _GRAN_UNIT = {"daily": "days", "monthly": "months", "yearly": "years",
               "per_file": "slices"}
 
 # Coverage-rate bins for representative-day selection (low, high, label).
-# Mirrors wip_coverage/plot_coverage_analysis.py; ``high`` of the top bin is
+# ``high`` of the top bin is
 # nudged past 1.0 so a perfect 1.00 day still lands in "Excellent".
 DEFAULT_COVERAGE_BINS = [
     (0.0, 0.3, "Low (0-30%)"),
@@ -139,8 +138,8 @@ def _draw_hist(ax, g, name, threshold, bins):
 # --------------------------------------------------------------------------- #
 # Representative days
 #
-# The wip prototype's representative-day maps drew flux-divergence *emissions*
-# and raw L2 pixels — both products of the wip_emission engine, out of scope for
+# An earlier prototype's representative-day maps drew flux-divergence *emissions*
+# and raw L2 pixels — both products of a separate emission engine, out of scope for
 # this lightweight processed-nc toolkit. What graduates here is (1) the
 # coverage-driven day *selection* (it consumes the tidy table directly) and
 # (2) a generic map of the *processed product field* on the selected days. No
@@ -291,8 +290,7 @@ def plot_representative_days(df, *, base_dir=None, bins=None, output=None,
 # the swath edge, and the genuine gaps between orbits. Useful for eyeballing
 # what the supersampling regridder in ``src.processing.l3`` is binning.
 #
-# Graduated from ``wip_coverage/plot_raw_L2_coverage.py``. Changes made on the
-# way in: the per-pixel Python loop is vectorised (that prototype looped over
+# Compared with the earlier prototype: the per-pixel Python loop is vectorised (it looped over
 # every sounding twice, once to test the bbox and once to build the polygon),
 # the hard-coded ``raw/NO2___`` path is replaced by the current
 # ``raw/L2/<product>/`` layout, and the qa threshold and unit scaling are

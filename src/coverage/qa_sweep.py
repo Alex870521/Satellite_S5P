@@ -5,8 +5,7 @@ raw TROPOMI L2 granule in a date range this computes — at several qa threshold
 — the fraction of a bounding box's pixels that survive
 ``qa_value >= threshold`` and are non-NaN.
 
-Graduated from ``wip_coverage/qa_coverage_analysis.py`` (fixes: seeded sampling,
-no blocking ``plt.show()``, filled-in report). It deliberately lives in its own
+Sampling is seeded and nothing blocks on ``plt.show()``. It deliberately lives in its own
 module rather than in :func:`src.coverage.compute_coverage`: that function reads
 *processed*, already-QC'd nc and reports per-region coverage over time, whereas
 here we read *raw* L2 swaths and the qa cutoff itself IS the variable. Region is

@@ -1,6 +1,6 @@
 """Cell-weighting schemes for the coverage denominator/numerator.
 
-``count``  — every in-region cell counts as 1 (the wip_coverage default).
+``count``  — every in-region cell counts as 1 (the default).
 ``area``   — cells weighted by cos(latitude), i.e. true geographic area, so
              coverage isn't biased by the lon-line convergence toward the pole.
 

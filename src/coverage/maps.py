@@ -12,9 +12,7 @@
 這裡的 count 是**時間維度上有幾天有資料**。同一個字但兩種語意,別混用。
 
 吃任何 `(time, lat, lon)` 的 nc —— 新的 L3 統一網格檔、舊的 merge 年檔都可以。
-從 `wip_coverage/analyze_modis_aod.py` 收進來:原版把三個計算綁在一個帶 logging 的
-analyzer class 上、且各產品的 vmin/vmax/cmap 硬寫在呼叫端的 config dict;這裡改成
-純函式 + 從 `catalog` 取產品設定。
+純函式;各產品的 vmin/vmax/cmap 從 `catalog` 取,不在呼叫端硬寫。
 """
 from __future__ import annotations
 

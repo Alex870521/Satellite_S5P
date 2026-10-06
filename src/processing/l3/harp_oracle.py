@@ -5,16 +5,15 @@
 六種 S5P 產品驗證過(NO2/O3/CO/CH4 r ≥ 0.99、SO2/HCHO ≥ 0.975,見 tests/test_l3.py),生產一律走純 Python 那條;這支存在的意義是
 「日後改動 regridder 時,還能重新跟一個外部標準對答案」。
 
-需要 HARP CLI(本機裝在 micromamba 的隔離 env,見 `HARP_BIN`),沒裝就回 None,
+需要 HARP CLI(`HARPCONVERT` 環境變數,或 PATH 上的 `harpconvert`),沒裝就回 None,
 呼叫端自行跳過 —— 不要讓沒裝 HARP 變成錯誤。
 
-從 `wip_l3/validate_supersample.py` / `phase0_verify.py` 收進來的:那兩支各自複製了一份
-`corners_from_centers` + `supersample`(現在在 `regridder.py`),只有這裡的 HARP 呼叫是
-它們獨有、且值得保留的部分。
+網格化本身(`corners_from_centers` / `supersample`)只在 `regridder.py`,這裡只負責呼叫 HARP。
 """
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -23,8 +22,14 @@ import numpy as np
 
 from src.processing.l3.granule import GridSpec
 
-#: HARP CLI 路徑。可用 ``HARPCONVERT`` 環境變數覆寫。
-HARP_BIN = os.environ.get("HARPCONVERT", os.path.expanduser("~/mamba/envs/harp/bin/harpconvert"))
+
+def _harp_bin() -> str | None:
+    """HARP CLI 路徑:``HARPCONVERT`` 環境變數優先,否則找 PATH 上的 ``harpconvert``。
+
+    呼叫時才查(不在 import 時決定),這樣 .env 晚一點載入也吃得到。
+    """
+    return os.environ.get("HARPCONVERT") or shutil.which("harpconvert")
+
 
 #: S5P 產品碼 → (HARP 變數名, HARP validity 變數名)。
 #: validity>50 等價於使用者慣用的 qa_value>=0.5(已確認一致)。
@@ -48,7 +53,8 @@ HARP_VARS = {
 
 def harp_available() -> bool:
     """HARP CLI 是否可用。"""
-    return Path(HARP_BIN).exists()
+    b = _harp_bin()
+    return b is not None and Path(b).exists()
 
 
 def harp_oracle(raw_nc: str | Path, product: str, grid: GridSpec,
@@ -68,7 +74,7 @@ def harp_oracle(raw_nc: str | Path, product: str, grid: GridSpec,
     with tempfile.TemporaryDirectory() as td:
         out = str(Path(td) / "oracle.nc")
         try:
-            r = subprocess.run([HARP_BIN, "-a", ops, str(raw_nc), out],
+            r = subprocess.run([str(_harp_bin()), "-a", ops, str(raw_nc), out],
                                capture_output=True, text=True, timeout=timeout)
         except (OSError, subprocess.TimeoutExpired):
             return None

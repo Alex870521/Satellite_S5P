@@ -383,44 +383,26 @@ def plot_stations_and_plants(env_station_file, taipower_station_file, counties_p
     return fig, ax
 
 
-# 使用範例
+# 使用範例:
+#   python -m src.visualization.plot_taiwan_power_plant 環境部空品測站基本資料.csv 台電空品測站基本資料.csv \
+#       --out taiwan_stations_plants.png
 if __name__ == "__main__":
-    # 報告圖組輸入資料夾（依個人環境調整）
-    desktop = Path.home() / "NTU/2024_台電計畫/計畫報告圖組/台灣火力電廠分布與空品測站分布"
+    import argparse
 
-    # 檔案名稱
-    env_station_file = "環境部空品測站基本資料.csv"
-    taipower_station_file = "台電空品測站基本資料.csv"
+    ap = argparse.ArgumentParser(description="台灣火力電廠與空品測站分布圖")
+    ap.add_argument("env_station_file", type=Path, help="環境部空品測站基本資料 CSV")
+    ap.add_argument("taipower_station_file", type=Path, help="台電空品測站基本資料 CSV")
+    ap.add_argument("--out", type=Path, default=Path("taiwan_stations_plants.png"))
+    a = ap.parse_args()
 
-    # 完整檔案路徑
-    env_file_path = desktop / env_station_file
-    taipower_file_path = desktop / taipower_station_file
+    missing = [f for f in (a.env_station_file, a.taipower_station_file) if not f.exists()]
+    if missing:
+        raise SystemExit("找不到:" + "、".join(str(f) for f in missing))
 
-    # 縣市邊界 shapefile 路徑（repo 內相對路徑）
-    counties_shapefile = (
-        Path(__file__).parents[2] / "data/shapefiles/Taiwan/COUNTY_MOI_1090820.shp")
-
-    # 檢查檔案是否存在
-    missing_files = []
-    if not env_file_path.exists():
-        missing_files.append(env_station_file)
-    if not taipower_file_path.exists():
-        missing_files.append(taipower_station_file)
-
-    if missing_files:
-        print(f"錯誤: 找不到以下檔案:")
-        for file in missing_files:
-            print(f"  - {file}")
-        print(f"請確認檔案是否在桌面上")
-    else:
-        # 繪製地圖
-        plot_stations_and_plants(
-            env_station_file=env_file_path,
-            taipower_station_file=taipower_file_path,
-            counties_path=counties_shapefile if counties_shapefile.exists() else None,
-            output_file=desktop / 'taiwan_stations_plants.png'
-        )
-
-        if not counties_shapefile.exists():
-            print(f"提示: 找不到縣市邊界檔案 {counties_shapefile}")
-            print("將使用簡化的空品區邊界")
+    counties_shapefile = Path(__file__).parents[2] / "data/shapefiles/Taiwan/COUNTY_MOI_1090820.shp"
+    plot_stations_and_plants(
+        env_station_file=a.env_station_file,
+        taipower_station_file=a.taipower_station_file,
+        counties_path=counties_shapefile if counties_shapefile.exists() else None,
+        output_file=a.out,
+    )

@@ -157,6 +157,11 @@ def animate_data(image_dir, output_path, date_type="auto", fps=2, resize=None, t
     return output_path
 
 if __name__ == "__main__":
-    image_dir = Path.home() / 'Desktop' / 'test_gif'
-    output_path = image_dir / 'S5P.gif'
-    animate_data(image_dir, output_path)
+    import argparse
+
+    ap = argparse.ArgumentParser(description="把一個資料夾裡的逐時圖檔合成 GIF")
+    ap.add_argument("image_dir", type=Path)
+    ap.add_argument("output_path", type=Path)
+    ap.add_argument("--fps", type=float, default=2)
+    a = ap.parse_args()
+    animate_data(a.image_dir, a.output_path, fps=a.fps)

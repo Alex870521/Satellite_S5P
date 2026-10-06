@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this toolkit in your work, please cite it as below."
+title: "Satellite Data Processing Toolkit"
+type: software
+authors:
+  - family-names: Chan
+    given-names: Chih-Yu
+    email: alex870521@gmail.com
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/Alex870521/Satellite_S5P"
+abstract: >-
+  Python toolkit to download, grid and plot atmospheric satellite data from
+  Sentinel-5P/TROPOMI, MODIS, GEMS and ERA5, with a unified footprint-supersampling
+  L3 pipeline that regrids all sources onto one common degree grid.
+keywords:
+  - satellite remote sensing
+  - Sentinel-5P
+  - TROPOMI
+  - GEMS
+  - MODIS
+  - air quality
+  - regridding

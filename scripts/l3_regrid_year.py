@@ -20,7 +20,6 @@
 """
 from __future__ import annotations
 
-import os
 
 import argparse
 import glob
@@ -29,14 +28,14 @@ import time
 from pathlib import Path
 
 
-from src.config.settings import DATA_ROOTS
+from src.config.settings import DATA_ROOTS, LOCAL_WORK_DIR
 from src.processing.l3.runner import (DEFAULT_BOUNDS, GEMS_RAW_DIR, SHORT_NAME, gems_slot,
                                       regrid_to_series)
 
 # 資料根目錄(可跨碟,見 settings.DATA_ROOTS);測試用 monkeypatch 換掉
 BASE_DIRS = list(DATA_ROOTS)
 # 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
-LOCAL_WORK = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "DataCenter/Satellite/Data"))
+LOCAL_WORK = LOCAL_WORK_DIR
 
 # source → (raw glob 樣板, adapter 工廠, 輸出短變數名)
 PREFIX = {"s5p": "S5P", "modis": "MODIS", "gems": "GEMS"}
@@ -60,7 +59,7 @@ def _opt_float(v: str) -> float | None:
 
 
 def _discover(source: str, product: str, year: int, base_dirs: list[Path]) -> list[Path]:
-    """跨碟找 raw 檔(S5P 在 Transcend/TOSHIBA 分散,MODIS 在 Transcend)。"""
+    """在 SATELLITE_DATA_ROOTS 的每一顆碟上找 raw 檔(同一產品可能分散在多顆碟)。"""
     pats = []
     for b in base_dirs:
         if source == "s5p":
@@ -128,7 +127,7 @@ def main(argv=None):
 
     base_dirs = [b for b in BASE_DIRS if b.exists()]
     if not base_dirs:
-        print("找不到任何外接碟(Transcend/TOSHIBA)", file=sys.stderr)
+        print("SATELLITE_DATA_ROOTS 裡沒有任何存在的資料根目錄", file=sys.stderr)
         return 2
     files = _discover(a.source, a.product, a.year, base_dirs)
     if a.limit:

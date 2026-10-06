@@ -1,8 +1,6 @@
 """MODIS 原始檔的結構性事實,寫成會持續生效的檢查。
 
-取代 `wip_coverage/` 那幾支一次性的 print 腳本(`check_modis_resolution.py`、
-`check_daily_duplicates.py`、`analyze_tile_coverage.py`、`test_specific_tiles.py`)。
-那些腳本把結論印在終端機上、看過就沒了 —— **`Optical_Depth_047` 是 (orbit, y, x) 這件事
+以前這些事實只靠一次性的 print 腳本確認,結論印在終端機上、看過就沒了 —— **`Optical_Depth_047` 是 (orbit, y, x) 這件事
 當初就印出來過,但沒有任何東西擋著「只取第 0 層」的寫法**,所以那個丟掉 165% 資料的 bug
 一直活著。事實變成斷言之後才擋得住。
 

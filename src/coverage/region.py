@@ -22,7 +22,7 @@ from src.config.settings import REGIONS
 _REPO = Path(__file__).resolve().parents[2]
 COUNTIES_SHP = _REPO / "data" / "shapefiles" / "taiwan" / "COUNTY_MOI_1090820.shp"
 
-# Air-quality zones (county groupings), mirroring wip_coverage definitions.
+# Air-quality zones (county groupings).
 AIR_QUALITY_ZONES = {
     "north":   ["臺北市", "新北市", "基隆市", "桃園市", "宜蘭縣"],
     "zhumiao": ["新竹縣", "新竹市", "苗栗縣"],

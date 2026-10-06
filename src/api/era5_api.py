@@ -708,14 +708,16 @@ class ERA5Hub(SatelliteHub):
 
     def _copy_csv_to_processed_dir(self, csv_files):
         """
-        複製 CSV 檔案到 ~/DataCenter/Processed/ERA5/
+        另存一份 CSV 到 ``ERA5_CSV_COPY_DIR``(環境變數,選用)。未設定就不複製。
 
         Parameters:
             csv_files (list): CSV 檔案路徑列表
         """
+        copy_dir = os.getenv("ERA5_CSV_COPY_DIR")
+        if not copy_dir:
+            return
         try:
-            # 目標目錄
-            target_dir = Path.home() / "DataCenter" / "Processed" / "ERA5"
+            target_dir = Path(os.path.expanduser(copy_dir))
             target_dir.mkdir(parents=True, exist_ok=True)
 
             copied_count = 0

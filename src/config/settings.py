@@ -36,6 +36,12 @@ BASE_DIR = Path(os.getenv("SATELLITE_BASE_DIR", Path(__file__).resolve().parents
 # 空字串視同未設(否則會得到 [],l3_regrid_year 就以為一顆碟都沒有)
 DATA_ROOTS = [Path(x) for x in (os.getenv("SATELLITE_DATA_ROOTS") or str(BASE_DIR)).split(os.pathsep) if x]
 
+# 本機工作檔(模型/分析直接讀的年檔:l3/、legacy_rbf/、static/)與環境部測站逐時 CSV。
+# 預設放在 repo 的 ./data 底下;實際位置請在 .env 用 LOCAL_WORK_DIR / MOE_STATION_DIR 指定。
+_REPO_DATA = Path(__file__).resolve().parents[2] / "data"
+LOCAL_WORK_DIR = Path(os.path.expanduser(os.getenv("LOCAL_WORK_DIR") or _REPO_DATA / "work"))
+MOE_STATION_DIR = Path(os.path.expanduser(os.getenv("MOE_STATION_DIR") or _REPO_DATA / "stations"))
+
 
 # 地理範圍設定 (min_lon, max_lon, min_lat, max_lat)
 FILTER_BOUNDARY = (120, 122, 22, 25)  # (118, 124, 20, 27)

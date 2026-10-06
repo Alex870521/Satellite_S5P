@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """下載環境部測站逐時值(aqx_p_488),輸出成模型讀得懂的每站 CSV。
 
-輸出到 $MOE_STATION_DIR/<year>/<站名>_aqx_p_488_<起>_<迄>.csv（預設 ~/DataCenter/MOE_AQ_STATION）
+輸出到 $MOE_STATION_DIR/<year>/<站名>_aqx_p_488_<起>_<迄>.csv（MOE_STATION_DIR 預設 ./data/stations）
 —— 檔名格式與既有年份一致,`cnn/ground.py` 與 `cnn/data.py` 用
 `*_aqx_p_488_*.csv` 這個 glob 抓檔,所以日期後綴不影響下游。
 
@@ -11,13 +11,15 @@
    下游讀的是 `time`,少了這欄整批資料會被當成沒有時間戳。
 
 ⚠️ **TLS**:data.moenv.gov.tw 走 TWCA Global Root CA,那張 root 沒有
-   Subject Key Identifier,Python 3.13+ 的嚴格模式會拒絕。這裡直接沿用
-   aero-web-server 的 `backend/utils/tw_gov_tls`(只清掉形式合規檢查、
+   Subject Key Identifier,Python 3.13+ 的嚴格模式會拒絕。這裡用
+   `src/utils/tw_gov_tls`(只清掉形式合規檢查、
    保留簽章/效期/主機名驗證,且僅對四個政府網域生效),
    **不要自己改成 verify=False**。
 
 ⚠️ **環境部資料庫本身有重複**:同一時間點常出現兩筆。這裡依
    (站名, datacreationdate) 去重,保留第一筆。
+
+需要:`.env` 的 `EPA_API_KEYS`(環境部開放資料平台申請,逗號分隔可放多把,配額用盡自動換下一把)。
 
 用法:
   python -m scripts.download_epa_stations --year 2026 --end-month 8
@@ -27,32 +29,26 @@ from __future__ import annotations
 import argparse
 import calendar
 import os
-import sys
 import time as _time
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pandas as pd
 
-# 權威的 TLS 處理在 aero-web-server,不複製一份 —— 複製容易被後人簡化成關掉驗證
-# aero-web-server 的 checkout 位置（借它的測站清單）。可用 AERO_WEB_DIR 覆寫。
-AERO_WEB = Path(os.getenv("AERO_WEB_DIR", Path.home() / "PycharmProjects/aero-web-server"))
-if str(AERO_WEB) not in sys.path:
-    sys.path.insert(0, str(AERO_WEB))
+from src.config.settings import MOE_STATION_DIR   # 也會載入 .env
+# 台灣政府網站的 TLS:只放寬 X509_STRICT 這一項格式檢查,**不關驗證**(說明見模組開頭)
+from src.utils.tw_gov_tls import requests_session
 
 # 環境部測站逐時檔的位置。可用 MOE_STATION_DIR 覆寫（換機器不必改碼）。
-OUT_ROOT = Path(os.getenv("MOE_STATION_DIR", Path.home() / "DataCenter/MOE_AQ_STATION"))
+OUT_ROOT = MOE_STATION_DIR
 API = "https://data.moenv.gov.tw/api/v2/aqx_p_488"
 PAGE = 1000
 
 
 def _keys() -> list[str]:
-    from dotenv import load_dotenv
-    load_dotenv(AERO_WEB / ".env")
     raw = os.getenv("EPA_API_KEYS") or os.getenv("EPA_API_KEY") or ""
     ks = [k.strip() for k in raw.split(",") if k.strip()]
     if not ks:
-        raise SystemExit("找不到 EPA 金鑰(aero-web-server/.env 的 EPA_API_KEYS)")
+        raise SystemExit("找不到環境部 API 金鑰:在 .env 設 EPA_API_KEYS(逗號分隔可放多把)")
     return ks
 
 
@@ -99,7 +95,6 @@ def main() -> int:
     ap.add_argument("--end-month", type=int, default=12)
     a = ap.parse_args()
 
-    from backend.utils.tw_gov_tls import requests_session
     sess = requests_session()
     keys = _keys()
 
