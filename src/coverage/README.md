@@ -88,7 +88,7 @@ python -m src.coverage.qa_sweep --product NO2___ \
 
 ```python
 from src.coverage import per_cell_stats, plot_cell_stats
-st = per_cell_stats("~/Satellite/Data/MODIS_aod_l3_02deg_2023.nc")
+st = per_cell_stats("~/DataCenter/Satellite/Data/l3/MODIS_mcd19a2_aod_l3_02deg_2023.nc")
 # st = {"mean", "count", "coverage"(0-100%), "n_time", "var"}
 plot_cell_stats("...nc", product="MCD19A2", output="aod_cellstats.png")   # 三聯圖
 ```

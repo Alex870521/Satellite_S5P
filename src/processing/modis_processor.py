@@ -1025,7 +1025,8 @@ class MODISProcessor:
             return False
 
     def _extract_mcd19a2_data(self, hdf_obj, datasets, filename: str = None,
-                              keep_orbits: bool = False) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+                              keep_orbits: bool = False, band: str = "047",
+                              qa: str = "none") -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
         """從 MCD19A2 文件中提取 AOD 數據和座標。
 
         MCD19A2 的 ``Optical_Depth_047`` 是 ``(orbit, y, x)`` —— 一天多次過境,實測每檔
@@ -1035,11 +1036,22 @@ class MODISProcessor:
 
         ``keep_orbits=True`` 回傳未收合的 3D,由呼叫端決定怎麼合併(L3 adapter 走
         沿軌道 nanmean)。座標永遠是 2D ``(y, x)``,對所有層共用。
+
+        ``band``:``"047"``(470 nm,預設 = 舊行為)或 ``"055"``(550 nm,文獻與 PM2.5 比對的
+        慣用波段)。實測 470 nm 比 550 nm 高約 17%(中位比 1.17)。
+        ``qa``:``"none"``(預設 = 舊行為)或 ``"best"`` —— 只留 ``AOD_QA`` 雲遮罩 = clear(bits 0–2
+        = 001)且 AOD 品質 = best(bits 8–11 = 0000);實測保留約 69% 有效像元,剔除的主要是
+        鄰近雲(QA 3/4)。預設維持舊值,是因為既有的 0.01° 年檔與 CNN 都建立在舊行為上。
         """
+        if band not in ("047", "055") or qa not in ("none", "best"):
+            raise ValueError(f"band 只能 047/055、qa 只能 none/best,收到 band={band!r} qa={qa!r}")
         try:
-            aod_name = 'Optical_Depth_047'
+            other = "055" if band == "047" else "047"
+            aod_name = f'Optical_Depth_{band}'
             if aod_name not in datasets:
-                aod_name = 'Optical_Depth_055'
+                if band == "055":       # 指定 550 卻沒有 → 不靜靜退回 470,寧可略過這個檔
+                    return None, None, None
+                aod_name = f'Optical_Depth_{other}'
                 if aod_name not in datasets:
                     return None, None, None
 
@@ -1049,18 +1061,31 @@ class MODISProcessor:
             if aod_data is None:
                 return None, None, None
 
+            qa_bits = None
+            if qa == "best":
+                if 'AOD_QA' not in datasets:
+                    return None, None, None
+                qa_bits, _ = self._get_data_pyhdf(hdf_obj, 'AOD_QA')
+                if qa_bits is None or qa_bits.shape != aod_data.shape:
+                    return None, None, None
+
             # MCD19A2 是 3D (orbit, y, x)
             if len(aod_data.shape) == 3 and not keep_orbits:
                 aod_data = aod_data[0, :, :]
+                qa_bits = qa_bits[0, :, :] if qa_bits is not None else None
 
             # 生成地理座標（永遠用空間兩維，3D 時所有層共用同一組座標）
             latitude, longitude = self._generate_mcd19a2_coordinates(aod_data.shape[-2:], filename or "MCD19A2.hdf")
-            
+
             # 處理數據
             scale_factor = aod_attrs.get('scale_factor', 0.0001)
             _FillValue = aod_attrs.get('_FillValue', -28672)
             aod_data = self._process_aod_data(aod_data, scale_factor, _FillValue)
-            
+            if qa_bits is not None:
+                q = np.asarray(qa_bits).astype(np.int64)
+                keep = ((q & 0b111) == 1) & (((q >> 8) & 0b1111) == 0)
+                aod_data = np.where(keep, aod_data, np.nan)
+
             return aod_data, latitude, longitude
             
         except Exception as e:

@@ -67,6 +67,12 @@ detect_level(自動偵測檔案結構)
 - `adapters/modis.py`:吃 `.nc`(`hdf4_to_netcdf` 的轉檔)或**直接吃 `.hdf`**。後者仍只透過
   `MODISProcessor` 的抽取方法碰 HDF4(沒有另開第二個 HDF4 入口),省下整年約 14GB 中繼檔;
   代價是需要 pyhdf(`[ingest]` extra)。MCD19A2 若為 (orbit,y,x) 會沿軌道 nanmean 收成 2D。
+- **MCD19A2 波段與品質(2026-10-07 修)**:舊抽取固定讀 `Optical_Depth_047`(470 nm,catalog 卻標 550 nm)且不看 `AOD_QA`。
+  L3 現在預設 **550 nm + `AOD_QA` best**(雲遮罩 clear 且品質 0000);CLI `--aod-band 047|055`、`--aod-qa none|best`,設定寫進 attrs。
+  實測 470/550 ≈ 1.17;QA best 冬季只留約一半格點(2023-01 前 20 檔 51%)。`MODISProcessor` 本身預設維持 047/none,
+  舊 0.01° 年檔與 CNN 不受影響;`--aod-band 047 --aod-qa none` 可逐格重現舊 L3 年檔。MOD04/MYD04 讀 `AOD_550_DT_DB_Combined`,本來就對。
+- **檔名(2026-10-07 修)**:三個 MODIS 產品變數短名都是 `aod`,CLI 預設檔名以前相同會互相覆蓋;現在 MOD04/MYD04 為
+  `MODIS_mod04_aod_…`/`MODIS_myd04_aod_…`,MCD19A2 為 `MODIS_mcd19a2_aod_…`(舊名 `MODIS_aod_…` 已改)。
 - `adapters/gems.py`:讀 `Data Fields`/`Geolocation Fields`,**不攤平**(超取樣需要 2D 才能推角點),
   把 QC 結果轉成 `qa` 權重交給 regridder 的門檻濾掉。AERAOD 三波長用 `band=` 選。
 - `config/catalog.py` 補上 `MCD19A2`/`MOD04_L2`/`MYD04_L2`/`GEMS_NO2`/`GEMS_O3T` 的 ProductConfig,

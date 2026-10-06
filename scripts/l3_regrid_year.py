@@ -36,7 +36,7 @@ from src.processing.l3.runner import (DEFAULT_BOUNDS, GEMS_RAW_DIR, SHORT_NAME, 
 # 資料根目錄(可跨碟,見 settings.DATA_ROOTS);測試用 monkeypatch 換掉
 BASE_DIRS = list(DATA_ROOTS)
 # 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
-LOCAL_WORK = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "Satellite/Data"))
+LOCAL_WORK = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "DataCenter/Satellite/Data"))
 
 # source → (raw glob 樣板, adapter 工廠, 輸出短變數名)
 PREFIX = {"s5p": "S5P", "modis": "MODIS", "gems": "GEMS"}
@@ -45,6 +45,10 @@ PREFIX = {"s5p": "S5P", "modis": "MODIS", "gems": "GEMS"}
 #   雲量 ≤ 0.3(官方建議)、DOAS 擬合殘差 ≤ 0.005(擋 24.34°N 探測器壞列,FinalAlgorithmFlags 擋不到);
 #   依台灣當地日期分組(UTC 23:45 是隔天 07:45);每個時槽各一個年檔,不把日變化平均掉。
 GEMS_DEFAULTS = {"cloud_max": 0.3, "rms_max": 0.005, "tz_offset_hours": 8, "slot_mode": "per-slot"}
+# MCD19A2:550 nm + AOD_QA best(與 catalog 標示一致)。要重現舊 0.01° 年檔口徑用 --aod-band 047 --aod-qa none
+MCD19A2_DEFAULTS = {"aod_band": "055", "aod_qa": "best"}
+# 檔名用的產品標籤:MODIS 三個產品的變數短名都是 aod,檔名必須分開,否則互相覆蓋
+FILE_TAG = {"MCD19A2": "mcd19a2_aod", "MOD04_L2": "mod04_aod", "MYD04_L2": "myd04_aod"}
 
 
 _UNSET = object()   # 「使用者沒給」;argparse 會對字串預設值套 type,所以不能用字串
@@ -103,6 +107,11 @@ def main(argv=None):
     g.add_argument("--slot-mode", choices=["per-slot", "merge"], default=None,
                    help="per-slot:每個時槽各一個年檔(GEMS 預設);merge:所有時槽合成一個")
     g.add_argument("--slots", default=None, help="只處理這些時槽(UTC HHMM,逗號分隔),例 0445,0545")
+    m = ap.add_argument_group("MCD19A2 專用(其他產品忽略)")
+    m.add_argument("--aod-band", choices=["047", "055"], default=MCD19A2_DEFAULTS["aod_band"],
+                   help="Optical_Depth_047(470 nm)或 _055(550 nm,預設)")
+    m.add_argument("--aod-qa", choices=["none", "best"], default=MCD19A2_DEFAULTS["aod_qa"],
+                   help="best(預設)= AOD_QA 雲遮罩 clear 且品質 best;none = 不篩")
     ap.add_argument("--tz-offset", type=float, default=None,
                     help="分組日期的時區位移(小時)。GEMS 預設 8 = 台灣當地日期;其他預設 0 = UTC")
     a = ap.parse_args(argv)
@@ -112,6 +121,8 @@ def main(argv=None):
     if gems:
         adapter_kwargs = {"cloud_max": GEMS_DEFAULTS["cloud_max"] if a.cloud_max is _UNSET else a.cloud_max,
                           "rms_max": GEMS_DEFAULTS["rms_max"] if a.rms_max is _UNSET else a.rms_max}
+    if a.source == "modis" and a.product == "MCD19A2":
+        adapter_kwargs = {"aod_band": a.aod_band, "aod_qa": a.aod_qa}
     tz = a.tz_offset if a.tz_offset is not None else (GEMS_DEFAULTS["tz_offset_hours"] if gems else 0)
     slot_mode = a.slot_mode or (GEMS_DEFAULTS["slot_mode"] if gems else "merge")
 
@@ -134,7 +145,7 @@ def main(argv=None):
 
     tag = f"{a.deg:g}".replace("0.", "").replace(".", "")   # 0.02 -> 02
     out = Path(a.out) if a.out else (
-        LOCAL_WORK / f"{PREFIX[a.source]}_{SHORT_NAME.get(a.product, a.product)}"
+        LOCAL_WORK / "l3" / f"{PREFIX[a.source]}_{FILE_TAG.get(a.product) or SHORT_NAME.get(a.product, a.product)}"
                      f"_l3_{tag}deg_{a.year}{'' if a.freq == 'D' else '_' + a.freq}.nc")
 
     # 每個工作 = (該批檔案, 輸出路徑, 時槽)。per-slot 時檔名加上 _HHMMUTC。
@@ -157,7 +168,7 @@ def main(argv=None):
 
     print(f"[l3] 目標網格 {a.deg}° bounds={DEFAULT_BOUNDS}  freq={a.freq}  K={a.K}"
           f"  日期基準 {'UTC' if not tz else f'UTC{tz:+g}h'}"
-          + (f"  品質篩選 {adapter_kwargs}" if gems else ""), flush=True)
+          + (f"  品質篩選 {adapter_kwargs}" if adapter_kwargs else ""), flush=True)
     for fs, o, sl in jobs:
         print(f"[l3] 輸出 → {o}" + (f"({len(fs)} 檔)" if sl else ""), flush=True)
     if a.dry_run:

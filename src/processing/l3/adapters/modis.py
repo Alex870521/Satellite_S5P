@@ -48,9 +48,18 @@ def _date_from_name(name: str) -> np.datetime64 | None:
 class MODISAdapter:
     source = "MODIS"
 
-    def __init__(self, file_type: str = "MCD19A2"):
+    def __init__(self, file_type: str = "MCD19A2", aod_band: str = "055", aod_qa: str = "best"):
+        """``aod_band`` / ``aod_qa`` 只對 MCD19A2 有作用(MOD04/MYD04 讀的
+        ``AOD_550_Dark_Target_Deep_Blue_Combined`` 本來就是 550 nm、已是官方 QA 篩過的合併產品)。
+
+        L3 預設 550 nm + ``AOD_QA`` best —— 與 catalog 標示的 550 nm 一致,也是文獻與 PM2.5 比對
+        的慣用口徑。舊 0.01° 年檔(processor 預設 470 nm、無 QA)不受影響;要重現舊口徑傳
+        ``aod_band="047", aod_qa="none"``。
+        """
         self.file_type = file_type
         self.product = PRODUCT_CONFIGS[file_type]
+        self.aod_band = aod_band
+        self.aod_qa = aod_qa
 
     # ------------------------------------------------------------------ #
     def read(self, nc_file: str | Path) -> GranuleL2 | None:
@@ -81,7 +90,11 @@ class MODISAdapter:
 
     # ------------------------------------------------------------------ #
     def _read_nc(self, path: Path):
-        """讀 hdf4_to_netcdf 產出的 swath nc(aod + 2D latitude/longitude)。"""
+        """讀 hdf4_to_netcdf 產出的 swath nc(aod + 2D latitude/longitude)。
+
+        ⚠️ 轉檔時波段與 QA 已定(processor 預設 470 nm、無 QA),``aod_band`` / ``aod_qa`` 管不到這條路;
+        原始檔一律走 ``_read_hdf``。
+        """
         ds = xr.open_dataset(path)
         try:
             var = self.product.dataset_name
@@ -115,7 +128,8 @@ class MODISAdapter:
                 # keep_orbits=True:MCD19A2 一天多次過境,只取第一層會丟掉約 165% 的
                 # 有效點,還會讓「第一層剛好全空」的日子整天被誤判為無資料。
                 val, lat, lon = proc._extract_mcd19a2_data(hdf_obj, datasets, path.name,
-                                                           keep_orbits=True)
+                                                           keep_orbits=True, band=self.aod_band,
+                                                           qa=self.aod_qa)
             else:
                 val, lat, lon = proc._extract_mod04_data(hdf_obj, datasets)
         finally:

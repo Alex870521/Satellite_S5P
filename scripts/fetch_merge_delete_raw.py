@@ -29,7 +29,7 @@ from src.merge import merge_product
 
 BOUNDARY = (119, 123, 21, 26)
 # 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
-LOCAL_WORK = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "Satellite/Data"))
+LOCAL_WORK = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "DataCenter/Satellite/Data"))
 
 
 def _raw_dir(product: str) -> Path:
@@ -91,7 +91,8 @@ def main():
 
     # 複製一份全年檔到本機工作目錄（與 2024 命名一致）
     if ok:
-        local = LOCAL_WORK / f"S5P_{a.product.strip('_')}_{y}0101_{y}1231.nc"
+        local = LOCAL_WORK / "legacy_rbf" / f"S5P_{a.product.strip('_')}_{y}0101_{y}1231.nc"
+        local.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(out, local)
         print(f"[copy] → {local}")
 

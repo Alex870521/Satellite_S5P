@@ -379,7 +379,7 @@ $SATELLITE_BASE_DIR/
 > **Data on more than one drive?** Set `SATELLITE_DATA_ROOTS` (os.pathsep-separated, e.g.
 > `/Volumes/Archive:/Volumes/Work`). Tools that look for the same product across drives —
 > `scripts/l3_regrid_year.py` and the data-backed tests — search every root; unset means just
-> `SATELLITE_BASE_DIR`. Gridded year files go to `LOCAL_WORK_DIR` (default `~/Satellite/Data`).
+> `SATELLITE_BASE_DIR`. Gridded year files go under `LOCAL_WORK_DIR` (default `~/DataCenter/Satellite/Data`): L3 in `l3/`, legacy RBF merges in `legacy_rbf/`, DEM in `static/`.
 > No path in the code names a specific drive, so swapping drives is an `.env` edit only.
 
 ## <div align="center">Automatic Data Management</div>

@@ -50,7 +50,7 @@ def make_adapter(source: str, product: str, **adapter_kwargs):
         return S5PAdapter(product)
     if source == "modis":
         from src.processing.l3.adapters import MODISAdapter
-        return MODISAdapter(product)
+        return MODISAdapter(product, **adapter_kwargs)
     if source == "gems":
         from src.processing.l3.adapters import GEMSAdapter
         return GEMSAdapter(product, **adapter_kwargs)
@@ -71,7 +71,8 @@ def regrid_to_series(source: str, product: str, files: Iterable[str | Path],
 
     回傳統計 dict(``n_files``/``n_periods``/``n_skipped``/``mean_coverage``/``out``/``seconds``)。
 
-    ``adapter_kwargs``:傳給 adapter 的品質篩選參數(GEMS:``cloud_max`` / ``rms_max``)。
+    ``adapter_kwargs``:傳給 adapter 的品質篩選參數(GEMS:``cloud_max`` / ``rms_max``;
+    MCD19A2:``aod_band`` / ``aod_qa``)。
     ``tz_offset_hours``:分窗用的時區位移(GEMS 用 8 = 台灣當地日期)。
     """
     files = [Path(f) for f in files]

@@ -27,7 +27,7 @@ from src.processing.modis_processor import MODISProcessor
 # earthaccess bounding_box 順序：(min_lon, min_lat, max_lon, max_lat)
 BOUNDARY = (119, 21, 123, 26)
 # 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
-LOCAL = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "Satellite/Data"))
+LOCAL = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "DataCenter/Satellite/Data"))
 
 
 def main():
@@ -65,8 +65,9 @@ def main():
         merge_by_month=False, output_filename=f"MCD19A2_{y}0101_{y}1231")
 
     src = LOCAL / f"_modis_tmp{y}" / "MCD19A2" / f"MCD19A2_{y}0101_{y}1231.nc"
-    dst = LOCAL / f"MCD19A2_{y}0101_{y}1231.nc"
+    dst = LOCAL / "legacy_rbf" / f"MCD19A2_{y}0101_{y}1231.nc"
     if ok and src.exists():
+        dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
         shutil.rmtree(LOCAL / f"_modis_tmp{y}", ignore_errors=True)
         ds = xr.open_dataset(dst)

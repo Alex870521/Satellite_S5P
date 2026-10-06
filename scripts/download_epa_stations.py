@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """下載環境部測站逐時值(aqx_p_488),輸出成模型讀得懂的每站 CSV。
 
-輸出到 $LOCAL_WORK_DIR/stations_<year>/<year>/<站名>_aqx_p_488_<起>_<迄>.csv（預設 ~/Satellite/Data）
+輸出到 $MOE_STATION_DIR/<year>/<站名>_aqx_p_488_<起>_<迄>.csv（預設 ~/DataCenter/MOE_AQ_STATION）
 —— 檔名格式與既有年份一致,`cnn/ground.py` 與 `cnn/data.py` 用
 `*_aqx_p_488_*.csv` 這個 glob 抓檔,所以日期後綴不影響下游。
 
@@ -40,8 +40,8 @@ AERO_WEB = Path(os.getenv("AERO_WEB_DIR", Path.home() / "PycharmProjects/aero-we
 if str(AERO_WEB) not in sys.path:
     sys.path.insert(0, str(AERO_WEB))
 
-# 本機放 gridded 工作檔的位置。可用 LOCAL_WORK_DIR 覆寫（換機器不必改碼）。
-OUT_ROOT = Path(os.getenv("LOCAL_WORK_DIR", Path.home() / "Satellite/Data"))
+# 環境部測站逐時檔的位置。可用 MOE_STATION_DIR 覆寫（換機器不必改碼）。
+OUT_ROOT = Path(os.getenv("MOE_STATION_DIR", Path.home() / "DataCenter/MOE_AQ_STATION"))
 API = "https://data.moenv.gov.tw/api/v2/aqx_p_488"
 PAGE = 1000
 
@@ -138,7 +138,7 @@ def main() -> int:
         if c not in df.columns:
             df[c] = ""
 
-    out_dir = OUT_ROOT / f"stations_{y}" / str(y)
+    out_dir = OUT_ROOT / str(y)
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = f"{start:%Y-%m-%d}_{end:%Y-%m-%d}"
     n_site = 0
